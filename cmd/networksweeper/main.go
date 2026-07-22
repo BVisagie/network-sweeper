@@ -30,7 +30,7 @@ func main() {
 	defer hs.Close()
 	defer ln.Close()
 
-	fmt.Printf("Network Sweeper %s\n", version.Version)
+	fmt.Printf("Network Sweeper %s\n", version.Display())
 	fmt.Printf("Dashboard: %s\n", srv.BaseURL)
 	fmt.Printf("OS: %s/%s  elevated: %v\n", runtime.GOOS, runtime.GOARCH, elevated)
 	fmt.Println("Listening on loopback only. Press Ctrl+C to stop.")

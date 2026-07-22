@@ -139,7 +139,7 @@ func (s *Server) uiHandler() http.Handler {
 				return
 			}
 			html := strings.Replace(string(data), "__SESSION_TOKEN__", s.Token, 1)
-			html = strings.Replace(html, "__APP_VERSION__", version.Version, 1)
+			html = strings.Replace(html, "__APP_VERSION__", version.Display(), 1)
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Header().Set("Cache-Control", "no-store")
 			_, _ = w.Write([]byte(html))
@@ -165,7 +165,7 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	writeJSON(w, map[string]any{
-		"version":      version.Version,
+		"version":      version.Display(),
 		"baseUrl":      s.BaseURL,
 		"elevated":     s.Elevated,
 		"customOptIn":  s.customOptIn,
