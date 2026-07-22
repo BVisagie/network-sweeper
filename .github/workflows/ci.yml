@@ -14,10 +14,11 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
         with:
-          go-version: "1.22.x"
+          go-version-file: go.mod
+          check-latest: true
       - name: Test
         run: go test ./...
       - name: Build
@@ -27,13 +28,14 @@ jobs:
     name: elevated-unit-linux
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
         with:
-          go-version: "1.22.x"
+          go-version-file: go.mod
+          check-latest: true
       - name: Unprivileged tests
         run: go test ./...
       - name: Root euid smoke (sudo)
         run: |
           # Confirms elevated detection under sudo; does not require LAN ARP sweeps in CI.
-          sudo go test ./internal/platform -count=1
+          sudo $(which go) test ./internal/platform -count=1

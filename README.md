@@ -39,6 +39,10 @@ Flags:
 - Loopback bind alone is **not** enough against malicious browser pages; the API requires a session token and validates `Origin`.
 - Unsigned binaries may trigger SmartScreen (Windows) or Gatekeeper (macOS). Code signing is deferred for v1 — see PLATFORM.md.
 
+## Requirements
+
+- Go **1.26.5** or newer (see `go.mod`)
+
 ## Development
 
 ```bash
