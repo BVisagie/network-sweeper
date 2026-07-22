@@ -19,7 +19,10 @@ jobs:
       - name: Cross-compile
         env:
           VERSION: ${{ github.ref_name }}
-        run: make cross
+        run: |
+          # Normalize tag (v0.1.0 → 0.1.0) before make strips again for safety.
+          export VERSION="${VERSION#v}"
+          make cross
       - name: Upload artifacts
         uses: softprops/action-gh-release@v3.0.2
         with:

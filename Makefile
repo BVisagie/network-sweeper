@@ -1,6 +1,8 @@
 .PHONY: test build cross clean run
 
+# Strip leading v from tags (v0.1.0 → 0.1.0) so the UI can prefix a single "v".
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.1.0-dev)
+VERSION := $(patsubst v%,%,$(VERSION))
 LDFLAGS := -X github.com/BVisagie/network-sweeper/internal/version.Version=$(VERSION)
 
 test:

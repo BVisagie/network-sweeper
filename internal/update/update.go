@@ -29,7 +29,7 @@ type ghRelease struct {
 // CheckLatest queries GitHub Releases for the newest tag. Caller must only
 // invoke this when the user has opted in.
 func CheckLatest(ctx context.Context, client *http.Client) Result {
-	res := Result{CheckedAt: time.Now().UTC(), Current: version.Version}
+	res := Result{CheckedAt: time.Now().UTC(), Current: version.Canonical()}
 	if client == nil {
 		client = &http.Client{Timeout: 8 * time.Second}
 	}
@@ -40,7 +40,7 @@ func CheckLatest(ctx context.Context, client *http.Client) Result {
 		return res
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "network-sweeper/"+version.Version)
+	req.Header.Set("User-Agent", "network-sweeper/"+version.Canonical())
 	resp, err := client.Do(req)
 	if err != nil {
 		res.Error = err.Error()
@@ -58,19 +58,20 @@ func CheckLatest(ctx context.Context, client *http.Client) Result {
 	}
 	res.Latest = strings.TrimPrefix(rel.TagName, "v")
 	res.ReleaseURL = rel.HTMLURL
-	res.UpdateAvailable = newer(res.Latest, stripDev(res.Current))
+	res.UpdateAvailable = newer(res.Latest, res.Current)
 	return res
 }
 
 func stripDev(v string) string {
+	v = strings.TrimPrefix(v, "v")
 	v = strings.TrimSuffix(v, "-dev")
 	return v
 }
 
 // newer reports whether latest looks greater than current (simple dotted compare).
 func newer(latest, current string) bool {
-	lp := splitVer(latest)
-	cp := splitVer(current)
+	lp := splitVer(stripDev(latest))
+	cp := splitVer(stripDev(current))
 	for i := 0; i < 3; i++ {
 		var a, b int
 		if i < len(lp) {
