@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "cursor/**"]
+  pull_request:
+
+jobs:
+  test:
+    name: test-${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: Test
+        run: go test ./...
+      - name: Build
+        run: go build -o network-sweeper ./cmd/networksweeper
+
+  elevated-linux:
+    name: elevated-unit-linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: Unprivileged tests
+        run: go test ./...
+      - name: Root euid smoke (sudo)
+        run: |
+          # Confirms elevated detection under sudo; does not require LAN ARP sweeps in CI.
+          sudo $(which go) test ./internal/platform -count=1

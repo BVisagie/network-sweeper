@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Network Sweeper</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="top">
+      <div class="brand">
+        <h1>Network Sweeper</h1>
+        <p class="tag">Local LAN overview &amp; exposure risks</p>
+      </div>
+      <div class="meta">
+        <span id="version"></span>
+        <span id="elevated-badge" class="badge" hidden>Elevated</span>
+      </div>
+    </header>
+
+    <section id="consent" class="panel consent">
+      <h2>Authorization</h2>
+      <p>Only scan networks you own or are explicitly authorized to assess. Scans default to detected local interface subnets.</p>
+      <label class="check">
+        <input type="checkbox" id="consent-check" />
+        I am authorized to scan the selected network ranges.
+      </label>
+      <button id="consent-continue" disabled>Continue</button>
+    </section>
+
+    <main id="main" hidden>
+      <div class="banner warn" id="discovery-banner">
+        In unprivileged mode, a host that does not accept connections on any <strong>discovery</strong> port will <strong>not appear at all</strong> — not merely with missing MAC/vendor. Locked-down IoT/media devices are often invisible until Deep discovery (ARP/ICMP) is used.
+      </div>
+
+      <nav class="tabs">
+        <button data-tab="overview" class="active">Overview</button>
+        <button data-tab="risks">Security risks</button>
+        <button data-tab="limitations">Limitations</button>
+        <button data-tab="settings">Settings</button>
+      </nav>
+
+      <section id="tab-overview" class="tab active">
+        <div class="toolbar">
+          <label>Target CIDR(s)
+            <input id="targets" type="text" placeholder="auto: local subnets" />
+          </label>
+          <label class="check">
+            <input type="checkbox" id="deep" />
+            Deep discovery (elevated ARP/ICMP)
+          </label>
+          <button id="scan-btn" class="primary">Start scan</button>
+          <button id="export-json">Export JSON</button>
+          <button id="export-csv">Export CSV</button>
+        </div>
+        <p id="scan-status" class="muted"></p>
+        <div class="grid">
+          <div>
+            <h3>Local interfaces</h3>
+            <pre id="ifaces" class="code"></pre>
+          </div>
+          <div>
+            <h3>Hosts <span id="host-count" class="muted"></span></h3>
+            <div id="hosts" class="table-wrap"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-risks" class="tab">
+        <h3>Findings <span id="finding-count" class="muted"></span></h3>
+        <div id="findings"></div>
+      </section>
+
+      <section id="tab-limitations" class="tab">
+        <h3>Platform capabilities</h3>
+        <div id="platform"></div>
+      </section>
+
+      <section id="tab-settings" class="tab">
+        <h3>Settings</h3>
+        <label class="check">
+          <input type="checkbox" id="custom-optin" />
+          Allow custom CIDR outside detected local subnets (I am authorized)
+        </label>
+        <p class="muted">Server-enforced. Without this, non-local ranges are rejected even if the UI is bypassed.</p>
+        <label class="check">
+          <input type="checkbox" id="updates-optin" />
+          Check for newer releases (opt-in; uses GitHub when enabled)
+        </label>
+        <button id="check-update">Check for updates now</button>
+        <pre id="update-result" class="code"></pre>
+      </section>
+    </main>
+  </div>
+  <script>
+    window.__NS_TOKEN__ = "__SESSION_TOKEN__";
+    window.__NS_VERSION__ = "__APP_VERSION__";
+  </script>
+  <script src="/app.js"></script>
+</body>
+</html>
