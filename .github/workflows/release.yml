@@ -1,0 +1,35 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+      - name: Cross-compile
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: make cross
+      - name: Upload artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/network-sweeper-linux-amd64
+            dist/network-sweeper-linux-arm64
+            dist/network-sweeper-windows-amd64.exe
+            dist/network-sweeper-darwin-amd64
+            dist/network-sweeper-darwin-arm64
+            dist/SHA256SUMS
+        # Signing / notarization hooks (post-v1):
+        # - Authenticode sign Windows exe
+        # - Apple notarize darwin binaries
+        # Artifacts and checksums are structured so those steps can be inserted here later.
