@@ -53,6 +53,15 @@ Consent is enforced server-side:
 - Custom CIDR outside that allowlist requires explicit Settings opt-in (“I am authorized…”)
 - API rejects disallowed ranges even if the UI is bypassed
 
+## Running on each OS
+
+End-user install and dependency details (including what is *not* required) live in the root [README.md](../README.md#client-requirements-end-users).
+
+Short version:
+
+- **Windows / Linux / macOS:** run the matching release binary; a browser is required; Go is not.
+- **Optional:** Administrator/`sudo` for Deep discovery; system `ping` for ICMP; unsigned-build allow steps below.
+
 ## Code signing (v1 decision)
 
 **Deferred for v1.** SmartScreen and Gatekeeper warnings are an adoption issue for unsigned security tools. Document “allow anyway” steps for testers; structure releases with checksums so signing/notarization can be added later without redesigning artifacts.
