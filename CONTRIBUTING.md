@@ -2,6 +2,8 @@
 
 Thanks for helping improve Network Sweeper.
 
+By participating, you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## Setup
 
 - Go version from `go.mod` (currently **1.26.5+**).
@@ -23,7 +25,7 @@ make build
 - Discovery honesty: Deep = ICMP; ARP = cache only; never mark unimplemented capabilities as `full` when elevated.
 - When capabilities change, update `docs/PLATFORM.md`, README, and `internal/platform.Snapshot` together.
 - Keep diffs focused; match existing style.
-- License: GNU GPL v3 (`LICENSE`).
+- License: GNU GPL v3 (`LICENSE`); copyright in `NOTICE`.
 
 ## Tests
 

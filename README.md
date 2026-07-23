@@ -1,10 +1,10 @@
 # Network Sweeper
 
-Cross-platform local LAN scanner with an embedded web UI. Discovers hosts on your local network, lists open common services, and surfaces heuristic cybersecurity exposure findings.
+A **local-first LAN inventory tool**: one stdlib Go binary embeds a localhost web UI, discovers devices on networks attached to your machine, lists common open services, and surfaces heuristic exposure tips (not a remote pentest suite or exploit framework).
 
 Supported OS: **Windows**, **Linux**, **macOS** (amd64 and arm64 where builds are published).
 
-License: [GNU GPL v3](LICENSE).
+License: [GNU GPL v3](LICENSE) — Copyright (C) 2026 Bernard Visagie ([NOTICE](NOTICE)).
 
 ## Client requirements (end users)
 
@@ -50,7 +50,7 @@ network-sweeper-windows-amd64.exe
 ```
 
 4. Your default browser should open to `http://127.0.0.1:<random-port>/`.
-5. Optional: enable **Deep discovery** next to Scan my network. On Windows, ping is often tried even without Admin; Run as administrator still helps for quieter devices.
+5. On Windows, ping is often tried even without Admin and even if Deep is unchecked. Optional: **Run as administrator** for quieter devices; Deep checkbox is optional on Windows.
 
 To print the URL without opening a browser:
 
@@ -168,6 +168,12 @@ Changelog: GitHub [Releases](https://github.com/BVisagie/network-sweeper/release
 - Unsigned binaries may trigger SmartScreen (Windows) or Gatekeeper (macOS). Code signing is deferred for v1 — see PLATFORM.md.
 - Vulnerability reports: see [SECURITY.md](SECURITY.md).
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## License
+
+Copyright (C) 2026 Bernard Visagie. See [NOTICE](NOTICE).
 
 [GNU General Public License v3.0](LICENSE).

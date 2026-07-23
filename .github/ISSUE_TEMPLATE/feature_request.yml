@@ -1,0 +1,47 @@
+name: Feature request
+description: Suggest an improvement within project scope
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please read [AGENTS.md](https://github.com/BVisagie/network-sweeper/blob/main/AGENTS.md) security invariants and [docs/PLATFORM.md](https://github.com/BVisagie/network-sweeper/blob/main/docs/PLATFORM.md) before proposing work.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user need or gap are you solving?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Concrete idea. Prefer portable, stdlib-friendly approaches.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Discovery / Deep / ARP
+        - Findings / risk labeling
+        - UI / UX
+        - Platform / elevation / docs
+        - Releases / update check
+        - Other
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope checks
+      options:
+        - label: This does not require binding beyond 127.0.0.1.
+          required: true
+        - label: This is not an exploit payload, weaponized scanner, or remote-target default.
+          required: true
+        - label: I understand new Go module dependencies need an explicit maintainer decision.
+          required: true
