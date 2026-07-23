@@ -113,17 +113,10 @@ func evalHost(hp hostPorts) []Finding {
 		"Open SMTP on LAN hosts can be abused for spam relay if misconfigured.",
 		"Disable unused SMTP; require auth; restrict relay.")
 
-	if hp.host.MAC == "" {
-		out = append(out, Finding{
-			ID: "unknown-mac-" + ip, Severity: SeverityInfo, Title: "MAC address unknown",
-			Description: "No ARP cache entry yet for this host; vendor identification is limited.",
-			Remediation: "Re-scan after traffic to the host, or use elevated Deep discovery for fuller L2 visibility.",
-			HostIP:      ip,
-		})
-	}
+	// Identification noise is kept low: skip standalone "MAC unknown" info findings.
 	if hp.host.Hostname == "" && hp.host.Vendor == "" {
 		out = append(out, Finding{
-			ID: "unknown-device-" + ip, Severity: SeverityLow, Title: "Unidentified device",
+			ID: "unknown-device-" + ip, Severity: SeverityInfo, Title: "Unidentified device",
 			Description: fmt.Sprintf("Host %s has no hostname and no known vendor OUI.", ip),
 			Remediation: "Verify whether this device is expected on your network; assign a hostname if it is yours.",
 			HostIP:      ip,

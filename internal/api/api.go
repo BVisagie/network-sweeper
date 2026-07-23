@@ -34,27 +34,29 @@ type Server struct {
 	WebFS      fs.FS
 	Elevated   bool
 
-	mu            sync.Mutex
-	customOptIn   bool
-	updatesOptIn  bool
-	lastScan      *ScanSnapshot
-	scanRunning   bool
-	scanProgress  string
-	cancelScan    context.CancelFunc
+	mu           sync.Mutex
+	customOptIn  bool
+	updatesOptIn bool
+	lastScan     *ScanSnapshot
+	scanRunning  bool
+	scanProgress string
+	cancelScan   context.CancelFunc
 }
 
 // ScanSnapshot is the last completed scan result.
 type ScanSnapshot struct {
-	StartedAt   time.Time         `json:"startedAt"`
-	FinishedAt  time.Time         `json:"finishedAt"`
-	Targets     []string          `json:"targets"`
-	Deep        bool              `json:"deep"`
-	CustomRange bool              `json:"customRange"`
-	Hosts       []discover.Host   `json:"hosts"`
-	Ports       []scan.Result     `json:"ports"`
-	Findings    []risk.Finding    `json:"findings"`
-	Error       string            `json:"error,omitempty"`
-	Warning     string            `json:"warning"`
+	StartedAt        time.Time       `json:"startedAt"`
+	FinishedAt       time.Time       `json:"finishedAt"`
+	DurationMs       int64           `json:"durationMs"`
+	Targets          []string        `json:"targets"`
+	Deep             bool            `json:"deep"`
+	CustomRange      bool            `json:"customRange"`
+	Hosts            []discover.Host `json:"hosts"`
+	Ports            []scan.Result   `json:"ports"`
+	Findings         []risk.Finding  `json:"findings"`
+	GatewayIP        string          `json:"gatewayIp,omitempty"`
+	Error            string          `json:"error,omitempty"`
+	Warning          string          `json:"warning"`
 }
 
 // New creates a server with a fresh session token.
@@ -80,6 +82,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/platform", s.withSecurity(s.handlePlatform))
 	mux.HandleFunc("/api/scan", s.withSecurity(s.handleScan))
 	mux.HandleFunc("/api/scan/status", s.withSecurity(s.handleScanStatus))
+	mux.HandleFunc("/api/scan/cancel", s.withSecurity(s.handleScanCancel))
 	mux.HandleFunc("/api/results", s.withSecurity(s.handleResults))
 	mux.HandleFunc("/api/export", s.withSecurity(s.handleExport))
 	mux.HandleFunc("/api/settings", s.withSecurity(s.handleSettings))
@@ -105,7 +108,6 @@ func (s *Server) withSecurity(next http.HandlerFunc) http.HandlerFunc {
 func (s *Server) originOK(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
-		// Same-origin navigations / non-CORS requests from the embedded UI.
 		return true
 	}
 	allowed := []string{
@@ -145,7 +147,6 @@ func (s *Server) uiHandler() http.Handler {
 			_, _ = w.Write([]byte(html))
 			return
 		}
-		// static assets
 		name := strings.TrimPrefix(path, "/")
 		b, err := fs.ReadFile(s.WebFS, name)
 		if err != nil {
@@ -185,11 +186,21 @@ func (s *Server) handleInterfaces(w http.ResponseWriter, r *http.Request) {
 		cidrs = append(cidrs, n.String())
 	}
 	writeJSON(w, map[string]any{
-		"interfaces":    ifaces,
-		"localSubnets":  cidrs,
+		"interfaces":     ifaces,
+		"localSubnets":   cidrs,
 		"discoveryPorts": discover.DiscoveryPorts,
 		"findingsPorts":  scan.FindingsPorts,
+		"gatewayIp":      netinfo.DefaultGatewayIPv4(),
+		"localIps":       keys(netinfo.LocalIPv4Set()),
 	})
+}
+
+func keys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }
 
 func (s *Server) handlePlatform(w http.ResponseWriter, r *http.Request) {
@@ -224,7 +235,7 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 		targets = local
 	} else {
 		for _, t := range req.Targets {
-			_, n, err := net.ParseCIDR(t)
+			_, n, err := net.ParseCIDR(strings.TrimSpace(t))
 			if err != nil {
 				http.Error(w, fmt.Sprintf("invalid target %q", t), http.StatusBadRequest)
 				return
@@ -238,10 +249,8 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.mu.Lock()
-	if req.CustomOptIn {
-		s.customOptIn = true
-	}
-	custom := s.customOptIn
+	// Per-scan opt-in from the request, or Settings toggle — scan body does not permanently sticky-set settings.
+	custom := req.CustomOptIn || s.customOptIn
 	if s.scanRunning {
 		s.mu.Unlock()
 		http.Error(w, "scan already running", http.StatusConflict)
@@ -266,6 +275,23 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"status": "started"})
 }
 
+func (s *Server) handleScanCancel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST required", http.StatusMethodNotAllowed)
+		return
+	}
+	s.mu.Lock()
+	cancel := s.cancelScan
+	running := s.scanRunning
+	s.mu.Unlock()
+	if !running || cancel == nil {
+		writeJSON(w, map[string]any{"status": "idle"})
+		return
+	}
+	cancel()
+	writeJSON(w, map[string]any{"status": "canceling"})
+}
+
 func (s *Server) runScan(ctx context.Context, targets []*net.IPNet, deep, custom bool) {
 	defer func() {
 		s.mu.Lock()
@@ -274,22 +300,33 @@ func (s *Server) runScan(ctx context.Context, targets []*net.IPNet, deep, custom
 		s.mu.Unlock()
 	}()
 
+	gateway := netinfo.DefaultGatewayIPv4()
+	selfIPs := netinfo.LocalIPv4Set()
+
 	snap := &ScanSnapshot{
 		StartedAt:   time.Now().UTC(),
 		Deep:        deep && s.Elevated,
 		CustomRange: custom,
+		GatewayIP:   gateway,
 		Warning:     "In unprivileged mode, a host that does not accept connections on any discovery port will not appear at all.",
 	}
 	for _, t := range targets {
 		snap.Targets = append(snap.Targets, t.String())
 	}
+	useICMP := runtime.GOOS == "windows" || (deep && s.Elevated)
+	if useICMP {
+		snap.Warning = "A host that does not accept connections on any discovery port (and is not found via ICMP) will not appear at all."
+	}
 	if deep && !s.Elevated {
-		snap.Warning += " Deep discovery requested but process is not elevated; using unprivileged probes only."
+		if runtime.GOOS == "windows" {
+			snap.Warning += " Deep discovery was requested without Admin; Windows still tries system ping as a best-effort boost. Run as administrator for more reliable quiet-host discovery."
+		} else {
+			snap.Warning += " Deep discovery requested but process is not elevated; ICMP is skipped. Relaunch with sudo, then enable Deep discovery."
+		}
 	}
 
 	eng := discover.NewEngine()
-	useICMP := runtime.GOOS == "windows" || (deep && s.Elevated)
-	hosts, err := eng.Discover(ctx, discover.Options{
+	res, err := eng.Discover(ctx, discover.Options{
 		Targets:     targets,
 		Deep:        deep && s.Elevated,
 		UseICMP:     useICMP,
@@ -304,10 +341,25 @@ func (s *Server) runScan(ctx context.Context, targets []*net.IPNet, deep, custom
 	if err != nil && ctx.Err() == nil {
 		snap.Error = err.Error()
 	}
+	if ctx.Err() != nil {
+		snap.Warning += " Scan was canceled."
+	}
+	if res.Truncated {
+		snap.Warning += fmt.Sprintf(" Address list was truncated to %d hosts (subnet(s) contain about %d usable addresses).", res.HostsEnumerated, res.HostsAvailable)
+	}
 
+	hosts := res.Hosts
 	for i := range hosts {
 		if hosts[i].MAC != "" {
 			hosts[i].Vendor = oui.Lookup(hosts[i].MAC)
+		}
+		if selfIPs[hosts[i].IP] {
+			hosts[i].IsSelf = true
+		}
+		if gateway != "" && hosts[i].IP == gateway {
+			hosts[i].IsGateway = true
+		} else if gateway == "" && netinfo.LooksLikeCommonRouter(hosts[i].IP) {
+			hosts[i].LikelyRouterGuess = true
 		}
 	}
 	snap.Hosts = hosts
@@ -320,10 +372,17 @@ func (s *Server) runScan(ctx context.Context, targets []*net.IPNet, deep, custom
 	s.scanProgress = "scanning ports"
 	s.mu.Unlock()
 
-	ports, _ := scan.ScanHosts(ctx, ips, 350*time.Millisecond, 64)
+	ports, scanErr := scan.ScanHosts(ctx, ips, 350*time.Millisecond, 64)
+	if scanErr != nil && ctx.Err() == nil {
+		if snap.Error != "" {
+			snap.Error += "; "
+		}
+		snap.Error += "port scan: " + scanErr.Error()
+	}
 	snap.Ports = ports
 	snap.Findings = risk.Evaluate(hosts, ports)
 	snap.FinishedAt = time.Now().UTC()
+	snap.DurationMs = snap.FinishedAt.Sub(snap.StartedAt).Milliseconds()
 
 	s.mu.Lock()
 	s.lastScan = snap
@@ -335,8 +394,8 @@ func (s *Server) handleScanStatus(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	writeJSON(w, map[string]any{
-		"running":  s.scanRunning,
-		"progress": s.scanProgress,
+		"running":   s.scanRunning,
+		"progress":  s.scanProgress,
 		"hasResult": s.lastScan != nil,
 	})
 }
@@ -431,7 +490,7 @@ func writeJSON(w http.ResponseWriter, v any) {
 
 func exportCSV(snap *ScanSnapshot) string {
 	var b strings.Builder
-	b.WriteString("ip,mac,vendor,hostname,alive_via,open_ports,finding_count\n")
+	b.WriteString("ip,mac,vendor,hostname,alive_via,open_ports,finding_count,is_self,is_gateway\n")
 	portsByIP := map[string][]string{}
 	findCount := map[string]int{}
 	for _, p := range snap.Ports {
@@ -443,15 +502,28 @@ func exportCSV(snap *ScanSnapshot) string {
 		findCount[f.HostIP]++
 	}
 	for _, h := range snap.Hosts {
-		b.WriteString(fmt.Sprintf("%s,%s,%s,%s,\"%s\",\"%s\",%d\n",
-			h.IP, h.MAC, csvEscape(h.Vendor), csvEscape(h.Hostname),
-			strings.Join(h.AliveVia, ";"), strings.Join(portsByIP[h.IP], ";"), findCount[h.IP]))
+		row := []string{
+			h.IP,
+			csvField(h.MAC),
+			csvField(h.Vendor),
+			csvField(h.Hostname),
+			csvField(strings.Join(h.AliveVia, ";")),
+			csvField(strings.Join(portsByIP[h.IP], ";")),
+			fmt.Sprintf("%d", findCount[h.IP]),
+			fmt.Sprintf("%t", h.IsSelf),
+			fmt.Sprintf("%t", h.IsGateway),
+		}
+		b.WriteString(strings.Join(row, ","))
+		b.WriteByte('\n')
 	}
 	return b.String()
 }
 
-func csvEscape(s string) string {
-	return strings.ReplaceAll(s, `"`, `""`)
+func csvField(s string) string {
+	if strings.ContainsAny(s, ",\"\n\r") {
+		return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
+	}
+	return s
 }
 
 // ListenAndServe binds 127.0.0.1:0 (ephemeral), sets BaseURL/ListenAddr, and serves.

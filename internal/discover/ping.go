@@ -5,6 +5,7 @@ import (
 	"net"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"time"
 )
 
@@ -25,32 +26,23 @@ func Ping(ctx context.Context, ip net.IP, timeout time.Duration) bool {
 		if ms < 100 {
 			ms = 100
 		}
-		cmd = exec.CommandContext(ctx, "ping", "-n", "1", "-w", itoa(ms), ip.String())
+		cmd = exec.CommandContext(ctx, "ping", "-n", "1", "-w", strconv.Itoa(ms), ip.String())
 	case "darwin":
-		cmd = exec.CommandContext(ctx, "ping", "-c", "1", "-W", "500", ip.String())
-	default: // linux
-		sec := int(timeout / time.Second)
+		// -W is timeout in milliseconds on macOS.
+		ms := int(timeout / time.Millisecond)
+		if ms < 100 {
+			ms = 100
+		}
+		cmd = exec.CommandContext(ctx, "ping", "-c", "1", "-W", strconv.Itoa(ms), ip.String())
+	default: // linux: -W is timeout in seconds (integer)
+		sec := int((timeout + time.Second - 1) / time.Second)
 		if sec < 1 {
 			sec = 1
 		}
-		cmd = exec.CommandContext(ctx, "ping", "-c", "1", "-W", itoa(sec), ip.String())
+		cmd = exec.CommandContext(ctx, "ping", "-c", "1", "-W", strconv.Itoa(sec), ip.String())
 	}
 	if err := cmd.Run(); err != nil {
 		return false
 	}
 	return true
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var b [16]byte
-	i := len(b)
-	for n > 0 {
-		i--
-		b[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(b[i:])
 }

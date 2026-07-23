@@ -6,8 +6,11 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/BVisagie/network-sweeper/internal/discover"
 )
 
 func testFS() fs.FS {
@@ -78,6 +81,35 @@ func TestCustomCIDRRejectedWithoutOptIn(t *testing.T) {
 	s.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestScanCancelIdle(t *testing.T) {
+	s := New(testFS(), false)
+	s.BaseURL = "http://127.0.0.1:12345"
+	req := httptest.NewRequest(http.MethodPost, "/api/scan/cancel", bytes.NewReader([]byte("{}")))
+	req.Header.Set(TokenHeader, s.Token)
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestCSVEscape(t *testing.T) {
+	snap := &ScanSnapshot{
+		Hosts: []discover.Host{{
+			IP: "10.0.0.2", MAC: "aa:bb:cc:dd:ee:ff",
+			Vendor: `Acme, "Inc"`, Hostname: "host\nname",
+			AliveVia: []string{"tcp/80"},
+		}},
+	}
+	out := exportCSV(snap)
+	if !strings.Contains(out, `"Acme, ""Inc"""`) {
+		t.Fatalf("vendor quoting: %s", out)
+	}
+	if !strings.Contains(out, `"host\nname"`) && !strings.Contains(out, "host") {
+		t.Fatalf("hostname: %s", out)
 	}
 }
 
