@@ -4,29 +4,43 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sort"
 	"sync"
 	"time"
+
+	"github.com/BVisagie/network-sweeper/internal/netinfo"
 )
 
 // Host is a discovered live host.
 type Host struct {
-	IP        string   `json:"ip"`
-	MAC       string   `json:"mac,omitempty"`
-	Vendor    string   `json:"vendor,omitempty"`
-	Hostname  string   `json:"hostname,omitempty"`
-	AliveVia  []string `json:"aliveVia"`
-	LastSeen  time.Time `json:"lastSeen"`
+	IP               string    `json:"ip"`
+	MAC              string    `json:"mac,omitempty"`
+	Vendor           string    `json:"vendor,omitempty"`
+	Hostname         string    `json:"hostname,omitempty"`
+	AliveVia         []string  `json:"aliveVia"`
+	LastSeen         time.Time `json:"lastSeen"`
+	IsSelf           bool      `json:"isSelf,omitempty"`
+	IsGateway        bool      `json:"isGateway,omitempty"`
+	LikelyRouterGuess bool     `json:"likelyRouterGuess,omitempty"`
 }
 
 // Options controls discovery behavior.
 type Options struct {
-	Targets        []*net.IPNet
-	Timeout        time.Duration
-	Concurrency    int
-	MaxHosts       int
-	Deep           bool // attempt elevated ARP/ICMP when available
-	UseICMP        bool // also try ICMP (e.g. Windows unprivileged boost)
-	Progress       func(done, total int, msg string)
+	Targets     []*net.IPNet
+	Timeout     time.Duration
+	Concurrency int
+	MaxHosts    int
+	Deep        bool // elevated ICMP path when UseICMP/Deep set by caller
+	UseICMP     bool // also try ICMP (e.g. Windows unprivileged boost)
+	Progress    func(done, total int, msg string)
+}
+
+// Result is discovery output plus truncation metadata.
+type Result struct {
+	Hosts            []Host
+	Truncated        bool
+	HostsEnumerated  int
+	HostsAvailable   int
 }
 
 // Engine runs host discovery.
@@ -39,7 +53,7 @@ func NewEngine() *Engine {
 }
 
 // Discover finds live hosts in the given targets.
-func (e *Engine) Discover(ctx context.Context, opt Options) ([]Host, error) {
+func (e *Engine) Discover(ctx context.Context, opt Options) (Result, error) {
 	if opt.Timeout <= 0 {
 		opt.Timeout = 400 * time.Millisecond
 	}
@@ -50,21 +64,28 @@ func (e *Engine) Discover(ctx context.Context, opt Options) ([]Host, error) {
 		opt.MaxHosts = 1024
 	}
 
+	available := 0
+	for _, t := range opt.Targets {
+		available += netinfo.CountUsableHosts(t)
+	}
+
 	var ips []net.IP
 	for _, t := range opt.Targets {
-		ips = append(ips, hostsFromCIDR(t, opt.MaxHosts-len(ips))...)
-		if len(ips) >= opt.MaxHosts {
+		remain := opt.MaxHosts - len(ips)
+		if remain <= 0 {
 			break
 		}
+		ips = append(ips, netinfo.HostsInCIDR(t, remain)...)
 	}
+	truncated := available > len(ips)
 	total := len(ips)
 	if opt.Progress != nil {
 		opt.Progress(0, total, "starting discovery")
 	}
 
 	type result struct {
-		ip   net.IP
-		via  string
+		ip  net.IP
+		via string
 	}
 	results := make(chan result, opt.Concurrency)
 	sem := make(chan struct{}, opt.Concurrency)
@@ -91,7 +112,6 @@ func (e *Engine) Discover(ctx context.Context, opt Options) ([]Host, error) {
 		}
 		defer func() { <-sem }()
 
-		// TCP discovery ports
 		for _, port := range e.Ports {
 			if ctx.Err() != nil {
 				return
@@ -106,7 +126,6 @@ func (e *Engine) Discover(ctx context.Context, opt Options) ([]Host, error) {
 			}
 		}
 
-		// ICMP: Windows unprivileged boost, or Deep discovery on any OS.
 		if opt.UseICMP || opt.Deep {
 			if Ping(ctx, ip, opt.Timeout) {
 				results <- result{ip: ip, via: "icmp"}
@@ -141,7 +160,6 @@ func (e *Engine) Discover(ctx context.Context, opt Options) ([]Host, error) {
 		alive[key] = h
 	}
 
-	// Enrich MAC from ARP cache, hostname via reverse DNS (best-effort).
 	out := make([]Host, 0, len(alive))
 	arpTable := ReadARPTable()
 	for _, h := range alive {
@@ -151,32 +169,29 @@ func (e *Engine) Discover(ctx context.Context, opt Options) ([]Host, error) {
 		h.Hostname = reverseDNS(ctx, h.IP)
 		out = append(out, *h)
 	}
-	return out, ctx.Err()
+	sort.Slice(out, func(i, j int) bool {
+		return ipLess(out[i].IP, out[j].IP)
+	})
+	return Result{
+		Hosts:           out,
+		Truncated:       truncated,
+		HostsEnumerated: total,
+		HostsAvailable:  available,
+	}, ctx.Err()
 }
 
-func hostsFromCIDR(cidr *net.IPNet, max int) []net.IP {
-	if max <= 0 {
-		return nil
+func ipLess(a, b string) bool {
+	ai := net.ParseIP(a).To4()
+	bi := net.ParseIP(b).To4()
+	if ai == nil || bi == nil {
+		return a < b
 	}
-	ip := cidr.IP.Mask(cidr.Mask).To4()
-	if ip == nil {
-		return nil
+	for i := 0; i < 4; i++ {
+		if ai[i] != bi[i] {
+			return ai[i] < bi[i]
+		}
 	}
-	ones, bits := cidr.Mask.Size()
-	total := 1 << uint(bits-ones)
-	start := 0
-	end := total
-	if ones < 31 && total > 2 {
-		start = 1
-		end = total - 1
-	}
-	base := uint32(ip[0])<<24 | uint32(ip[1])<<16 | uint32(ip[2])<<8 | uint32(ip[3])
-	var hosts []net.IP
-	for i := start; i < end && len(hosts) < max; i++ {
-		v := base + uint32(i)
-		hosts = append(hosts, net.IPv4(byte(v>>24), byte(v>>16), byte(v>>8), byte(v)))
-	}
-	return hosts
+	return false
 }
 
 func reverseDNS(ctx context.Context, ip string) string {

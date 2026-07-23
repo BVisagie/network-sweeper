@@ -1,15 +1,58 @@
 package update
 
-import "testing"
+import (
+	"context"
+	"io"
+	"net/http"
+	"strings"
+	"testing"
+)
 
-func TestNewer(t *testing.T) {
-	if !newer("0.2.0", "0.1.0") {
-		t.Fatal("expected 0.2.0 > 0.1.0")
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestCheckLatestOK(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body := `{"tag_name":"v9.9.9","html_url":"https://github.com/BVisagie/network-sweeper/releases/tag/v9.9.9"}`
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     make(http.Header),
+		}, nil
+	})}
+	res := CheckLatest(context.Background(), client)
+	if res.Error != "" {
+		t.Fatal(res.Error)
 	}
-	if newer("0.1.0", "0.1.0") {
-		t.Fatal("same version should not be newer")
+	if !res.UpdateAvailable || res.Latest != "9.9.9" {
+		t.Fatalf("%#v", res)
 	}
-	if newer("0.1.0", "0.2.0-dev") {
-		t.Fatal("0.1.0 should not be newer than 0.2.0")
+	if !strings.Contains(res.Message, "newer") {
+		t.Fatal(res.Message)
+	}
+}
+
+func TestCheckLatest404(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: 404,
+			Body:       io.NopCloser(strings.NewReader(`{"message":"Not Found"}`)),
+			Header:     make(http.Header),
+		}, nil
+	})}
+	res := CheckLatest(context.Background(), client)
+	if res.Error == "" || !strings.Contains(res.Error, "No public releases") {
+		t.Fatalf("%#v", res)
+	}
+}
+
+func TestCheckLatestTransportError(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return nil, io.EOF
+	})}
+	res := CheckLatest(context.Background(), client)
+	if res.Error == "" || !strings.Contains(res.Error, "Couldn’t reach GitHub") {
+		t.Fatalf("%#v", res)
 	}
 }

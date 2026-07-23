@@ -168,26 +168,65 @@ func sameNetwork(a, b *net.IPNet) bool {
 // HostsInCIDR enumerates usable IPv4 hosts in cidr (skips network/broadcast for masks < 31).
 // Caps at maxHosts to avoid huge allocations.
 func HostsInCIDR(cidr *net.IPNet, maxHosts int) []net.IP {
-	if cidr == nil || cidr.IP.To4() == nil {
+	if cidr == nil || cidr.IP.To4() == nil || maxHosts <= 0 {
 		return nil
 	}
 	ip := cidr.IP.Mask(cidr.Mask).To4()
 	ones, bits := cidr.Mask.Size()
-	total := 1 << uint(bits-ones)
-	if total > maxHosts+2 {
-		total = maxHosts + 2
-	}
-	var hosts []net.IP
+	usable := CountUsableHosts(cidr)
 	base := uint32(ip[0])<<24 | uint32(ip[1])<<16 | uint32(ip[2])<<8 | uint32(ip[3])
 	start := uint32(0)
-	end := uint32(total)
-	if ones < 31 && total > 2 {
+	if ones < 31 && usable > 0 && (1<<uint(bits-ones)) > 2 {
 		start = 1
-		end = uint32(total) - 1
 	}
-	for i := start; i < end && len(hosts) < maxHosts; i++ {
-		v := base + i
+	var hosts []net.IP
+	for i := uint32(0); len(hosts) < maxHosts && int(i) < usable; i++ {
+		v := base + start + i
 		hosts = append(hosts, net.IPv4(byte(v>>24), byte(v>>16), byte(v>>8), byte(v)))
 	}
 	return hosts
+}
+
+// CountUsableHosts returns how many host addresses a CIDR would yield (network/broadcast skipped for masks < 31).
+func CountUsableHosts(cidr *net.IPNet) int {
+	if cidr == nil || cidr.IP.To4() == nil {
+		return 0
+	}
+	ones, bits := cidr.Mask.Size()
+	total := 1 << uint(bits-ones)
+	if ones < 31 && total > 2 {
+		return total - 2
+	}
+	return total
+}
+
+// LocalIPv4Set returns a set of this machine's non-loopback IPv4 addresses.
+func LocalIPv4Set() map[string]bool {
+	out := map[string]bool{}
+	ifaces, err := ListIPv4Interfaces()
+	if err != nil {
+		return out
+	}
+	for _, iface := range ifaces {
+		if iface.IsLoop {
+			continue
+		}
+		for _, ip := range iface.IPv4 {
+			out[ip] = true
+		}
+	}
+	return out
+}
+
+// LooksLikeCommonRouter reports whether ip is a common home-router host address (.1 or .254).
+func LooksLikeCommonRouter(ipStr string) bool {
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+	v4 := ip.To4()
+	if v4 == nil {
+		return false
+	}
+	return v4[3] == 1 || v4[3] == 254
 }

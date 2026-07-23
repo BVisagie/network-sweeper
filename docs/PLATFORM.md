@@ -2,7 +2,7 @@
 
 Network Sweeper runs as a **local executable** with an embedded web UI on Windows, Linux, and macOS.
 
-Legend: **full** = unprivileged in typical home setups · **elevated** = needs Admin/root/capabilities · **partial** = works with limits · **unavailable** = not implemented or blocked by the network/OS · **deferred** = intentionally postponed
+Legend: **Available** = works with current privileges · **Needs elevation** = feature requires Admin/root (not the same as “app is elevated”) · **Partial** = works with limits · **Unavailable** = not implemented or blocked · **Not built yet** = deferred
 
 ## Capability matrix
 
@@ -11,30 +11,38 @@ Legend: **full** = unprivileged in typical home setups · **elevated** = needs A
 - IPv4 interface + CIDR detection
 - TCP connect discovery (dedicated discovery port set)
 - TCP findings port scan + service labels
-- ARP cache MAC enrichment after contact + offline OUI vendor lookup
+- ARP **cache** MAC enrichment after contact + offline OUI vendor lookup
 - Hardened local API (ephemeral port, per-launch token, Origin checks)
 - Server-side default restriction to detected local subnets
 
 ### Elevated / partial
 
-- **Active ARP sweep** — elevated on Windows/Linux/macOS. Raw/L2 sockets need Admin / `CAP_NET_RAW` / root.
-- **ICMP ping discovery** — partial on Windows (system ping / IP Helper may work without full elevation); elevated on Linux/macOS for reliable ICMP. Unprivileged mode uses TCP discovery first.
-- **Hostnames (DNS / mDNS / NetBIOS)** — partial everywhere; many IoT devices advertise little.
-- **OS / device fingerprint** — partial; port heuristics only in v1.
+- **ICMP ping discovery (Deep discovery)** — On **Windows**, system `ping` is attempted as an extra discovery signal even without elevation (and even when Deep is unchecked). On **Linux/macOS**, ICMP runs only when Deep is enabled **and** the process is elevated (`sudo`). Unprivileged mode always tries TCP discovery ports first. Deep discovery does **not** perform an active ARP sweep.
+- **Hostname (reverse DNS)** — partial everywhere; reverse DNS only (no mDNS/NetBIOS queries). Many IoT devices advertise little.
+- **Device identification** — partial; port service labels + OUI vendor lookup only (not OS fingerprinting).
 
 ### Unavailable or deferred
 
-- **SYN / raw half-open scan** — unavailable in v1 (portability).
+- **Active ARP sweep** — deferred (not implemented).
+- **SYN / raw half-open scan** — unavailable (portability).
 - **Hosts behind Wi‑Fi AP / client isolation** — unavailable; peers hidden at L2.
 - **Other VLANs / guest Wi‑Fi** — unavailable; only attached segments are visible.
-- **Bind UI beyond localhost** — unavailable in v1.
+- **Bind UI beyond localhost** — unavailable.
 - **Code signing / Apple notarization** — deferred post-v1.
 
 ## Discovery incompleteness (important)
 
-In **unprivileged** mode, a host that does not accept connections on any **discovery** port will **not appear at all** — not merely with missing MAC/vendor. Locked-down IoT/media devices are often invisible until Deep discovery (ARP/ICMP with elevation) succeeds.
+A host that does not accept connections on any **discovery** port will **not appear at all** unless ICMP finds it — not merely with missing MAC/vendor. Locked-down IoT/media devices are often invisible until ping succeeds (**Deep discovery** + elevation on Linux/macOS; Windows often already tries ping).
 
 Discovery ports (coverage-oriented) are separate from findings ports (risk/service labeling).
+
+## How to run elevated (Deep discovery)
+
+- **Windows:** optional — right-click the `.exe` → **Run as administrator** for more reliable quiet-host discovery, then enable Deep discovery beside **Scan my network**.
+- **macOS:** `sudo ./network-sweeper-darwin-arm64` (or `darwin-amd64`), then enable Deep discovery.
+- **Linux:** `sudo ./network-sweeper-linux-amd64` (or `linux-arm64`), then enable Deep discovery.
+
+Deep discovery is a checkbox on the Overview scan row (not inside Advanced options). Advanced options cover custom CIDR and export.
 
 ## Local API security
 
@@ -50,7 +58,7 @@ Binding to `127.0.0.1` alone does not stop a malicious web page from calling the
 Consent is enforced server-side:
 
 - Default allowlist = CIDRs of detected local interfaces
-- Custom CIDR outside that allowlist requires explicit Settings opt-in (“I am authorized…”)
+- Custom CIDR outside that allowlist requires the Settings toggle **Allow custom CIDR…** (enforced server-side on `POST /api/scan`)
 - API rejects disallowed ranges even if the UI is bypassed
 
 ## Running on each OS
@@ -60,7 +68,7 @@ End-user install and dependency details (including what is *not* required) live 
 Short version:
 
 - **Windows / Linux / macOS:** run the matching release binary; a browser is required; Go is not.
-- **Optional:** Administrator/`sudo` for Deep discovery; system `ping` for ICMP; unsigned-build allow steps below.
+- **Optional:** Administrator/`sudo` for Deep discovery on macOS/Linux; system `ping` for ICMP (Windows often tries ping without elevation); unsigned-build allow steps below.
 
 ## Code signing (v1 decision)
 
@@ -74,4 +82,4 @@ Short version:
 
 ## CI coverage notes
 
-GitHub Actions runs unprivileged unit/smoke tests on `windows-latest`, `ubuntu-latest`, and `macos-latest`. Full elevated ARP sweeps are not assumed available on all runners; privileged paths are covered with unit tests and limited Linux `sudo` checks where practical.
+GitHub Actions runs unprivileged unit/smoke tests on `windows-latest`, `ubuntu-latest`, and `macos-latest`. Privileged paths are covered with unit tests and limited Linux `sudo` checks where practical.
