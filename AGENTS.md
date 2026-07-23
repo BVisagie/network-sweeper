@@ -55,4 +55,3 @@ When capabilities change, update together:
 - Prefer minimal, focused diffs; match existing style.
 - Keep dashboard panel chrome visually consistent across tabs.
 - Project license: **GNU GPL v3** (`LICENSE`).
-- Improvement roadmap: `docs/IMPROVEMENT_PLAN.md`.

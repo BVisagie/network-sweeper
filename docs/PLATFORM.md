@@ -36,13 +36,13 @@ A host that does not accept connections on any **discovery** port will **not app
 
 Discovery ports (coverage-oriented) are separate from findings ports (risk/service labeling).
 
-## How to run elevated (Deep discovery)
+## Elevation and Deep discovery
 
-- **Windows:** optional — right-click the `.exe` → **Run as administrator** for more reliable quiet-host discovery, then enable Deep discovery beside **Scan my network**.
-- **macOS:** `sudo ./network-sweeper-darwin-arm64` (or `darwin-amd64`), then enable Deep discovery.
-- **Linux:** `sudo ./network-sweeper-linux-amd64` (or `linux-arm64`), then enable Deep discovery.
+- **Windows:** system `ping` is already tried as a best-effort discovery boost **even without Admin and even when Deep is unchecked**. For quieter devices, optionally right-click the `.exe` → **Run as administrator**. Enabling the Deep checkbox is optional on Windows; elevation mainly improves ping reliability.
+- **macOS:** `sudo ./network-sweeper-darwin-arm64` (or `darwin-amd64`), **then** enable Deep discovery beside **Scan my network**.
+- **Linux:** `sudo ./network-sweeper-linux-amd64` (or `linux-arm64`), **then** enable Deep discovery.
 
-Deep discovery is a checkbox on the Overview scan row (not inside Advanced options). Advanced options cover custom CIDR and export.
+On Linux/macOS, Deep discovery needs both elevation and the checkbox. Deep is on the Overview scan row (not inside Advanced options). Advanced options cover custom CIDR and export.
 
 ## Local API security
 

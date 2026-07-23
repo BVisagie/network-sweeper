@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/BVisagie/network-sweeper/security/advisories/new
+    about: Please report security issues privately (see SECURITY.md).
+  - name: Documentation and platform notes
+    url: https://github.com/BVisagie/network-sweeper/blob/main/docs/PLATFORM.md
+    about: OS capability matrix, Deep discovery, and known limitations.
