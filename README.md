@@ -118,11 +118,53 @@ The app binds **only** to `127.0.0.1` on an ephemeral port and uses a per-launch
 
 ## Build from source (developers)
 
-Requirements:
+Requirements once Go is installed:
 
 - Go **1.26.5** or newer (see `go.mod`)
 - `make` (optional; you can call `go` directly)
-- Same optional OS tools as above (`ping`, browser)
+- Same optional OS tools as end users (`ping`, browser)
+- No Node toolchain — the UI is plain files under `web/`
+
+### Install Go (dev machines)
+
+Confirm with `go version` (need **1.26.5+**). If your distro’s package is older, use the [official Go install](https://go.dev/dl/) instead of the package manager.
+
+**Fedora / RHEL-family**
+
+```bash
+sudo dnf install -y golang make git
+go version
+```
+
+**Debian / Ubuntu**
+
+```bash
+sudo apt update
+sudo apt install -y golang-go make git
+go version
+```
+
+If `apt` ships an older Go, install from [go.dev/dl](https://go.dev/dl/) (tarball under `/usr/local` or `$HOME/sdk`) and put `go` on your `PATH`.
+
+**macOS**
+
+```bash
+# Homebrew
+brew install go make git
+go version
+```
+
+Or install the macOS package from [go.dev/dl](https://go.dev/dl/).
+
+**Windows**
+
+- Winget: `winget install GoLang.Go`
+- Or the MSI from [go.dev/dl](https://go.dev/dl/)
+- Optional: `winget install Git.Git` and a `make` (e.g. from Chocolatey / MSYS2) — or skip `make` and use `go test` / `go build` directly
+
+Open a **new** terminal after install so `PATH` picks up `go`.
+
+### Run / build
 
 ```bash
 git clone https://github.com/BVisagie/network-sweeper.git
@@ -130,11 +172,18 @@ cd network-sweeper
 go run ./cmd/networksweeper
 ```
 
-Or:
+Handy in an IDE terminal (prints the URL, no browser):
+
+```bash
+make run
+# same as: go run ./cmd/networksweeper -no-browser
+```
+
+Or a binary:
 
 ```bash
 make build
-./bin/network-sweeper
+./bin/network-sweeper          # Windows: bin\network-sweeper.exe
 ```
 
 Tests and cross-compile:
@@ -144,6 +193,8 @@ make test
 make cross   # writes dist/ binaries + SHA256SUMS
 ```
 
+Deep discovery while developing on Linux/macOS needs elevation, e.g. `sudo go run ./cmd/networksweeper -no-browser` (keep `go` on `sudo`’s `PATH`, or use `sudo env "PATH=$PATH" go run …`).
+
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/RELEASING.md](docs/RELEASING.md), and [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Features
@@ -152,7 +203,8 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/RELEASING.md](docs/RELEA
 - Unprivileged TCP **discovery** ports + broader **findings** ports
 - Best-effort ICMP via system `ping` (**Deep discovery** on Linux/macOS when elevated; Windows often boosts with ping even without Admin)
 - ARP **cache** MAC enrichment + compact OUI vendor lookup (no active ARP sweep)
-- Heuristic security findings with remediation text
+- Lightweight service enrichment: HTTP titles/`Server`, TLS cert summary, SSH/FTP/SMTP banners
+- Heuristic security findings with remediation text (including DB/RPC/admin ports and TLS hints)
 - **This device** / **Gateway** / **Router?** (guess) badges, host filter, copy IP/MAC, scan summary
 - Server-enforced scan targets: default = detected local subnets; custom CIDR requires Settings opt-in
 - Hardened local API: Origin checks + per-launch token

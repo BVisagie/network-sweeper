@@ -9,7 +9,8 @@ cmd/networksweeper     CLI entry: flags, start API, open browser, signal shutdow
 internal/api           Localhost HTTP, token/Origin hardening, scan orchestration, export
 internal/discover      TCP discovery ports, optional ICMP (ping), ARP cache MAC, reverse DNS
 internal/scan          Findings-port TCP connect scan + service labels
-internal/risk          Heuristic findings from open ports / host metadata
+internal/enrich        Short HTTP title/Server, TLS cert summary, SSH/FTP/SMTP banners
+internal/risk          Heuristic findings from open ports / enrichment / host metadata
 internal/netinfo       Interfaces, CIDR helpers, allowlist, default gateway (best-effort)
 internal/oui           Offline MAC vendor prefix map
 internal/platform      Elevation detection + capability snapshot for Limitations UI
@@ -24,7 +25,8 @@ web/                   Embedded UI (index.html, style.css, app.js) via embed.FS
 2. `discover.Engine.Discover` probes discovery ports; ICMP via system `ping` when Windows boost applies or Deep+elevated on Unix.
 3. MAC from ARP cache + OUI; hosts tagged as self / gateway (or soft router guess) when known.
 4. `scan.ScanHosts` probes findings ports on live hosts.
-5. `risk.Evaluate` builds findings; snapshot stored for UI/export (`POST /api/scan/cancel` aborts an in-flight run).
+5. `enrich.Results` adds lightweight HTTP/TLS/banner hints on relevant open ports.
+6. `risk.Evaluate` builds findings; snapshot stored for UI/export (`POST /api/scan/cancel` aborts an in-flight run).
 
 ## Local API security
 

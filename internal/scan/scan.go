@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+// OpenPort enrichment fields are filled by internal/enrich after the connect scan.
+
 // FindingsPorts are scanned on known-live hosts for service labeling and risk.
 var FindingsPorts = []int{
 	21, 22, 23, 25, 53, 80, 110, 111, 135, 139, 143, 443, 445, 993, 995,
@@ -51,10 +53,20 @@ var ServiceNames = map[int]string{
 	9100:  "Printer",
 }
 
-// OpenPort is an open TCP port with a service label.
+// OpenPort is an open TCP port with a service label and optional probe hints.
 type OpenPort struct {
 	Port    int    `json:"port"`
 	Service string `json:"service"`
+
+	// Optional post-connect enrichment (stdlib probes; educational only).
+	Banner        string    `json:"banner,omitempty"`
+	HTTPTitle     string    `json:"httpTitle,omitempty"`
+	HTTPServer    string    `json:"httpServer,omitempty"`
+	TLSCommonName string    `json:"tlsCommonName,omitempty"`
+	TLSIssuer     string    `json:"tlsIssuer,omitempty"`
+	TLSNotAfter   time.Time `json:"tlsNotAfter,omitempty"`
+	TLSSelfSigned bool      `json:"tlsSelfSigned,omitempty"`
+	TLSExpired    bool      `json:"tlsExpired,omitempty"`
 }
 
 // Result is per-host findings scan output.
