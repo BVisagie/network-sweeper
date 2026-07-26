@@ -12,6 +12,7 @@ Legend: **Available** = works with current privileges · **Needs elevation** = f
 - TCP connect discovery (dedicated discovery port set)
 - TCP findings port scan + service labels
 - ARP **cache** MAC enrichment after contact + offline OUI vendor lookup
+- Service enrichment on open findings ports: HTTP title/`Server`, TLS cert summary (CN/issuer/expiry/self-signed), SSH/FTP/SMTP banners
 - Hardened local API (ephemeral port, per-launch token, Origin checks)
 - Server-side default restriction to detected local subnets
 
@@ -19,7 +20,7 @@ Legend: **Available** = works with current privileges · **Needs elevation** = f
 
 - **ICMP ping discovery (Deep discovery)** — On **Windows**, system `ping` is attempted as an extra discovery signal even without elevation (and even when Deep is unchecked). On **Linux/macOS**, ICMP runs only when Deep is enabled **and** the process is elevated (`sudo`). Unprivileged mode always tries TCP discovery ports first. Deep discovery does **not** perform an active ARP sweep.
 - **Hostname (reverse DNS)** — partial everywhere; reverse DNS only (no mDNS/NetBIOS queries). Many IoT devices advertise little.
-- **Device identification** — partial; port service labels + OUI vendor lookup only (not OS fingerprinting).
+- **Device identification** — partial; port labels + OUI + HTTP/TLS/banner hints (not OS fingerprinting). See [future-plans/tier3-plus-enrichment.md](future-plans/tier3-plus-enrichment.md) for mDNS/NetBIOS and related backlog.
 
 ### Unavailable or deferred
 

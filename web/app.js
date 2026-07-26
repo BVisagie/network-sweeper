@@ -46,6 +46,45 @@
     return `Port ${n} (${label}). An open service on this device — check whether you recognize it.`;
   }
 
+  function portEnrichLines(op) {
+    const lines = [];
+    if (op.httpTitle) lines.push(`Title: ${op.httpTitle}`);
+    if (op.httpServer) lines.push(`Server: ${op.httpServer}`);
+    if (op.tlsCommonName) lines.push(`TLS CN: ${op.tlsCommonName}`);
+    if (op.tlsIssuer) lines.push(`TLS issuer: ${op.tlsIssuer}`);
+    if (op.tlsNotAfter) {
+      const d = String(op.tlsNotAfter).slice(0, 10);
+      lines.push(op.tlsExpired ? `TLS expired: ${d}` : `TLS valid until: ${d}`);
+    } else if (op.tlsExpired) {
+      lines.push("TLS certificate expired");
+    }
+    if (op.tlsSelfSigned) lines.push("Self-signed certificate");
+    if (op.banner) lines.push(`Banner: ${op.banner}`);
+    return lines;
+  }
+
+  function portTipText(op) {
+    const base = portHelpText(op.port, op.service);
+    const extra = portEnrichLines(op);
+    return extra.length ? `${base}\n${extra.join("\n")}` : base;
+  }
+
+  function identityHintFromPorts(ports) {
+    for (const p of ports || []) {
+      if (p.httpTitle) return p.httpTitle;
+    }
+    for (const p of ports || []) {
+      if (p.tlsCommonName) return p.tlsCommonName;
+    }
+    for (const p of ports || []) {
+      if (p.httpServer) return p.httpServer;
+    }
+    for (const p of ports || []) {
+      if (p.banner) return String(p.banner).slice(0, 64);
+    }
+    return "";
+  }
+
   const STATUS_LABEL = {
     full: "Available",
     elevated: "Needs elevation",
@@ -157,7 +196,8 @@
       $("progress-bar").style.width = pct + "%";
       return;
     }
-    if (/scanning ports/i.test(progress || "")) $("progress-bar").style.width = "95%";
+    if (/scanning ports/i.test(progress || "")) $("progress-bar").style.width = "90%";
+    if (/enriching/i.test(progress || "")) $("progress-bar").style.width = "96%";
     if (/done/i.test(progress || "")) $("progress-bar").style.width = "100%";
   }
 
@@ -383,19 +423,19 @@
   }
 
   function portPill(op) {
-    const help = portHelpText(op.port, op.service);
+    const help = portTipText(op);
     const label = `${op.port}/${op.service || "service"}`;
-    return `<span class="port-pill" tabindex="0" data-tip="${escapeHtml(help)}" aria-label="${escapeHtml(label)}: ${escapeHtml(help)}"><span class="port-pill-label">${escapeHtml(label)}</span></span>`;
+    const tipAttr = escapeHtml(help).replace(/\n/g, " · ");
+    return `<span class="port-pill" tabindex="0" data-tip="${tipAttr}" aria-label="${escapeHtml(label)}: ${tipAttr}"><span class="port-pill-label">${escapeHtml(label)}</span></span>`;
   }
 
-  function renderPortsCompact(ports, limit = 4) {
+  function renderPortsCompact(ports, hostIp, limit = 4) {
     if (!ports.length) return `<span class="muted">—</span>`;
     const shown = ports.slice(0, limit);
     const rest = ports.length - shown.length;
-    const allTitle = ports.map((p) => `${p.port}/${p.service}`).join(", ");
     let html = `<div class="port-list">${shown.map(portPill).join("")}`;
     if (rest > 0) {
-      html += `<button type="button" class="port-more" data-ports="${escapeHtml(allTitle)}" aria-label="Show ${rest} more ports">+${rest}</button>`;
+      html += `<button type="button" class="port-more" data-host-ip="${escapeHtml(hostIp || "")}" aria-label="Show ${rest} more ports">+${rest}</button>`;
     }
     html += `</div>`;
     return html;
@@ -469,9 +509,12 @@
     `;
   }
 
-  function hostMatchesFilter(h, q) {
+  function hostMatchesFilter(h, q, ports) {
     if (!q) return true;
-    const blob = [h.ip, h.mac, h.vendor, h.hostname].join(" ").toLowerCase();
+    const hints = (ports || [])
+      .flatMap((p) => [p.httpTitle, p.httpServer, p.tlsCommonName, p.banner, p.service])
+      .filter(Boolean);
+    const blob = [h.ip, h.mac, h.vendor, h.hostname, ...hints].join(" ").toLowerCase();
     return blob.includes(q);
   }
 
@@ -562,7 +605,7 @@
     for (const p of data.ports || []) portsByIP[p.ip] = p.ports || [];
     const findings = data.findings || [];
     const q = (filterQ || "").trim().toLowerCase();
-    const filtered = hosts.filter((h) => hostMatchesFilter(h, q));
+    const filtered = hosts.filter((h) => hostMatchesFilter(h, q, portsByIP[h.ip]));
 
     $("host-count").textContent = String(filtered.length) + (q ? ` / ${hosts.length}` : "");
 
@@ -595,8 +638,12 @@
         else if (sev.high) badges.push(`<button type="button" class="tag-pill risk high" data-open-risks="${escapeHtml(h.ip)}">${sev.high} high</button>`);
         else if (hostFindings.length) badges.push(`<button type="button" class="tag-pill risk" data-open-risks="${escapeHtml(h.ip)}">${hostFindings.length}</button>`);
 
-        const namePrimary = h.hostname || h.vendor || "";
-        const nameSecondary = h.hostname && h.vendor ? h.vendor : "";
+        const hint = identityHintFromPorts(ports);
+        const namePrimary = h.hostname || hint || h.vendor || "";
+        const secondaryParts = [];
+        if (h.hostname && hint) secondaryParts.push(hint);
+        if (h.vendor && namePrimary !== h.vendor) secondaryParts.push(h.vendor);
+        const nameSecondary = secondaryParts.join(" · ");
 
         return `<tr>
           <td class="col-device">
@@ -615,7 +662,7 @@
             ${nameSecondary ? `<div class="name-secondary">${escapeHtml(nameSecondary)}</div>` : ""}
           </td>
           <td class="col-via mono">${escapeHtml((h.aliveVia || []).join(", ") || "—")}</td>
-          <td class="col-ports">${renderPortsCompact(ports)}</td>
+          <td class="col-ports">${renderPortsCompact(ports, h.ip)}</td>
         </tr>`;
       })
       .join("");
@@ -649,13 +696,8 @@
         const list = btn.closest(".port-list");
         if (!list || list.dataset.expanded === "1") return;
         hideFloatTip();
-        const ports = (btn.dataset.ports || "").split(", ").filter(Boolean);
-        list.innerHTML = ports
-          .map((p) => {
-            const [port, service] = p.split("/");
-            return portPill({ port, service: service || "" });
-          })
-          .join("");
+        const ports = portsByIP[btn.dataset.hostIp] || [];
+        list.innerHTML = ports.map(portPill).join("");
         list.dataset.expanded = "1";
         bindPortTips(list);
       });

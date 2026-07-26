@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/BVisagie/network-sweeper/internal/discover"
+	"github.com/BVisagie/network-sweeper/internal/enrich"
 	"github.com/BVisagie/network-sweeper/internal/netinfo"
 	"github.com/BVisagie/network-sweeper/internal/oui"
 	"github.com/BVisagie/network-sweeper/internal/platform"
@@ -45,18 +46,18 @@ type Server struct {
 
 // ScanSnapshot is the last completed scan result.
 type ScanSnapshot struct {
-	StartedAt        time.Time       `json:"startedAt"`
-	FinishedAt       time.Time       `json:"finishedAt"`
-	DurationMs       int64           `json:"durationMs"`
-	Targets          []string        `json:"targets"`
-	Deep             bool            `json:"deep"`
-	CustomRange      bool            `json:"customRange"`
-	Hosts            []discover.Host `json:"hosts"`
-	Ports            []scan.Result   `json:"ports"`
-	Findings         []risk.Finding  `json:"findings"`
-	GatewayIP        string          `json:"gatewayIp,omitempty"`
-	Error            string          `json:"error,omitempty"`
-	Warning          string          `json:"warning"`
+	StartedAt   time.Time       `json:"startedAt"`
+	FinishedAt  time.Time       `json:"finishedAt"`
+	DurationMs  int64           `json:"durationMs"`
+	Targets     []string        `json:"targets"`
+	Deep        bool            `json:"deep"`
+	CustomRange bool            `json:"customRange"`
+	Hosts       []discover.Host `json:"hosts"`
+	Ports       []scan.Result   `json:"ports"`
+	Findings    []risk.Finding  `json:"findings"`
+	GatewayIP   string          `json:"gatewayIp,omitempty"`
+	Error       string          `json:"error,omitempty"`
+	Warning     string          `json:"warning"`
 }
 
 // New creates a server with a fresh session token.
@@ -379,6 +380,10 @@ func (s *Server) runScan(ctx context.Context, targets []*net.IPNet, deep, custom
 		}
 		snap.Error += "port scan: " + scanErr.Error()
 	}
+	s.mu.Lock()
+	s.scanProgress = "enriching services"
+	s.mu.Unlock()
+	ports = enrich.Results(ctx, ports, 800*time.Millisecond, 32)
 	snap.Ports = ports
 	snap.Findings = risk.Evaluate(hosts, ports)
 	snap.FinishedAt = time.Now().UTC()
@@ -490,25 +495,41 @@ func writeJSON(w http.ResponseWriter, v any) {
 
 func exportCSV(snap *ScanSnapshot) string {
 	var b strings.Builder
-	b.WriteString("ip,mac,vendor,hostname,alive_via,open_ports,finding_count,is_self,is_gateway\n")
-	portsByIP := map[string][]string{}
+	b.WriteString("ip,mac,vendor,hostname,identity_hint,alive_via,open_ports,http_titles,tls_names,banners,finding_count,is_self,is_gateway\n")
+	portsByIP := map[string][]scan.OpenPort{}
 	findCount := map[string]int{}
 	for _, p := range snap.Ports {
-		for _, op := range p.Ports {
-			portsByIP[p.IP] = append(portsByIP[p.IP], fmt.Sprintf("%d/%s", op.Port, op.Service))
-		}
+		portsByIP[p.IP] = p.Ports
 	}
 	for _, f := range snap.Findings {
 		findCount[f.HostIP]++
 	}
 	for _, h := range snap.Hosts {
+		ports := portsByIP[h.IP]
+		var open, titles, tlsNames, banners []string
+		for _, op := range ports {
+			open = append(open, fmt.Sprintf("%d/%s", op.Port, op.Service))
+			if op.HTTPTitle != "" {
+				titles = append(titles, fmt.Sprintf("%d:%s", op.Port, op.HTTPTitle))
+			}
+			if op.TLSCommonName != "" {
+				tlsNames = append(tlsNames, fmt.Sprintf("%d:%s", op.Port, op.TLSCommonName))
+			}
+			if op.Banner != "" {
+				banners = append(banners, fmt.Sprintf("%d:%s", op.Port, op.Banner))
+			}
+		}
 		row := []string{
 			h.IP,
 			csvField(h.MAC),
 			csvField(h.Vendor),
 			csvField(h.Hostname),
+			csvField(enrich.IdentityHint(ports)),
 			csvField(strings.Join(h.AliveVia, ";")),
-			csvField(strings.Join(portsByIP[h.IP], ";")),
+			csvField(strings.Join(open, ";")),
+			csvField(strings.Join(titles, ";")),
+			csvField(strings.Join(tlsNames, ";")),
+			csvField(strings.Join(banners, ";")),
 			fmt.Sprintf("%d", findCount[h.IP]),
 			fmt.Sprintf("%t", h.IsSelf),
 			fmt.Sprintf("%t", h.IsGateway),

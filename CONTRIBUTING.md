@@ -6,16 +6,18 @@ By participating, you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Setup
 
-- Go version from `go.mod` (currently **1.26.5+**).
-- Optional: `make` for `test` / `build` / `cross`.
+1. Install Go **1.26.5+** (and optional `make` / `git`) for your OS — see **Install Go (dev machines)** in [README.md](README.md#install-go-dev-machines) (Fedora/`dnf`, Debian/`apt`, macOS/`brew`, Windows/`winget`).
+2. Confirm: `go version`
+3. Clone and verify:
 
 ```bash
 git clone https://github.com/BVisagie/network-sweeper.git
 cd network-sweeper
 make test
-make build
-./bin/network-sweeper -no-browser
+make run    # or: go run ./cmd/networksweeper -no-browser
 ```
+
+No Node install is required. End-user release binaries do not need Go at all.
 
 ## Guidelines
 
