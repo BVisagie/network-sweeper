@@ -199,7 +199,7 @@ func sanitizeHeader(s string) string {
 }
 
 func sanitizeLine(s string) string {
-	s = strings.TrimSpace(s)
+	s = decodeHTMLEntities(strings.TrimSpace(s))
 	if s == "" {
 		return ""
 	}
@@ -225,6 +225,23 @@ func sanitizeLine(s string) string {
 		return ""
 	}
 	return out
+}
+
+func decodeHTMLEntities(s string) string {
+	if !strings.Contains(s, "&") {
+		return s
+	}
+	// Decode named/numeric entities before &amp; so &amp;quot; becomes &quot; then ".
+	s = strings.NewReplacer(
+		"&quot;", `"`,
+		"&#34;", `"`,
+		"&#39;", `'`,
+		"&apos;", `'`,
+		"&lt;", "<",
+		"&gt;", ">",
+		"&nbsp;", " ",
+	).Replace(s)
+	return strings.ReplaceAll(s, "&amp;", "&")
 }
 
 // IdentityHint returns a short human label from enriched ports (title, CN, or banner).

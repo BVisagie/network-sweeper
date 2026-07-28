@@ -189,8 +189,34 @@ func evalHost(hp hostPorts) []Finding {
 
 	out = append(out, evalEnrichment(ip, hp.ports)...)
 
-	// Identification noise is kept low: skip when hostname, vendor, or probe hints identify the host.
-	if hp.host.Hostname == "" && hp.host.Vendor == "" && !hasIdentityHint(hp.ports) {
+	if hp.host.UPnP {
+		desc := fmt.Sprintf("Host %s answered an SSDP/UPnP discovery on the LAN.", ip)
+		if hp.host.UPnPFriendlyName != "" {
+			desc = fmt.Sprintf("Host %s answered SSDP/UPnP discovery (friendly name %q).", ip, hp.host.UPnPFriendlyName)
+		}
+		out = append(out, Finding{
+			ID: "upnp-ssdp-" + ip, Severity: SeverityInfo, Title: "UPnP/SSDP responder on LAN",
+			Description: desc,
+			Remediation: "Disable UPnP if unused; keep firmware updated; restrict UPnP to trusted segments when possible.",
+			HostIP:      ip,
+		})
+	}
+	if hp.host.SNMPPublic {
+		desc := fmt.Sprintf("Host %s answered SNMP with the default community string \"public\".", ip)
+		if hp.host.SNMPSysDescr != "" {
+			desc = fmt.Sprintf("Host %s answered SNMP community \"public\" (%s).", ip, hp.host.SNMPSysDescr)
+		}
+		out = append(out, Finding{
+			ID: "snmp-public-" + ip, Severity: SeverityMedium, Title: "SNMP reachable with public community",
+			Description: desc,
+			Remediation: "Change or disable the default SNMP community; restrict UDP/161 to management hosts; prefer SNMPv3 with auth.",
+			HostIP:      ip,
+			Port:        161,
+		})
+	}
+
+	// Identification noise is kept low: skip when hostname, vendor, UPnP name, or probe hints identify the host.
+	if hp.host.Hostname == "" && hp.host.Vendor == "" && hp.host.UPnPFriendlyName == "" && !hasIdentityHint(hp.ports) {
 		out = append(out, Finding{
 			ID: "unknown-device-" + ip, Severity: SeverityInfo, Title: "Unidentified device",
 			Description: fmt.Sprintf("Host %s has no hostname and no known vendor OUI.", ip),

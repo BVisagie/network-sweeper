@@ -39,11 +39,36 @@
     9100: "Network printer raw printing port.",
   };
 
+  // How the host was first noticed during discovery.
+  const VIA_HELP = {
+    icmp:
+      "Found with a ping (ICMP). The device answered even if it keeps most ports closed — useful for quiet phones, TVs, and IoT.",
+    arp:
+      "Found with ARP on your local network (“who has this IP?”). Catches devices that ignore ping and don’t open common ports. Needs Deep discovery + elevation on Linux/macOS.",
+  };
+
+  function tipAttr(text) {
+    return escapeHtml(String(text || "")).replace(/\n/g, " · ");
+  }
+
   function portHelpText(port, service) {
     const n = Number(port);
     if (PORT_HELP[n]) return PORT_HELP[n];
     const label = service || "network service";
     return `Port ${n} (${label}). An open service on this device — check whether you recognize it.`;
+  }
+
+  function viaTipText(via) {
+    const raw = String(via || "").trim();
+    const key = raw.toLowerCase();
+    if (VIA_HELP[key]) return VIA_HELP[key];
+    const m = key.match(/^tcp\/(\d+)$/);
+    if (m) {
+      const port = Number(m[1]);
+      const extra = PORT_HELP[port] ? ` ${PORT_HELP[port]}` : "";
+      return `Found because this device accepted a TCP connection on discovery port ${port}.${extra}`;
+    }
+    return `How we first noticed this device on the network (${raw || "unknown"}).`;
   }
 
   function portEnrichLines(op) {
@@ -85,6 +110,12 @@
     return "";
   }
 
+  function identityHintFromHost(h, ports) {
+    if (h && h.upnpFriendlyName) return String(h.upnpFriendlyName).slice(0, 64);
+    if (h && h.snmpSysDescr) return String(h.snmpSysDescr).slice(0, 64);
+    return identityHintFromPorts(ports);
+  }
+
   const STATUS_LABEL = {
     full: "Available",
     elevated: "Needs elevation",
@@ -107,24 +138,24 @@
         return {
           short: "Run as administrator",
           detail:
-            "Close this app, then right-click the Network Sweeper .exe → Run as administrator. Deep discovery (ping) works more reliably that way.",
+            "Close this app, then right-click the Network Sweeper .exe → Run as administrator. Deep discovery (ping) works more reliably that way. Active ARP is not available on Windows in this version.",
         };
       case "darwin":
         return {
           short: "Restart with sudo",
           detail:
-            "Close this app, then in Terminal run: sudo ./network-sweeper-darwin-arm64 (or the amd64 build). Enter your Mac password when prompted.",
+            "Close this app, then in Terminal run: sudo ./network-sweeper-darwin-arm64 (or the amd64 build). Enter your Mac password when prompted. Deep discovery then uses ping and ARP.",
         };
       case "linux":
         return {
           short: "Restart with sudo",
           detail:
-            "Close this app, then run: sudo ./network-sweeper-linux-amd64 (or arm64). Deep discovery needs root for reliable ping on most distros.",
+            "Close this app, then run: sudo ./network-sweeper-linux-amd64 (or arm64). Deep discovery needs root for ping and ARP on most distros.",
         };
       default:
         return {
           short: "Run with administrator / root privileges",
-          detail: "Relaunch Network Sweeper with elevated privileges for Deep discovery (ICMP ping).",
+          detail: "Relaunch Network Sweeper with elevated privileges for Deep discovery (ICMP ping; ARP on Linux/macOS).",
         };
     }
   }
@@ -177,6 +208,19 @@
       .replace(/"/g, "&quot;");
   }
 
+  /** Decode common entities that sometimes arrive in titles / UPnP names. */
+  function humanizeText(s) {
+    return String(s ?? "")
+      .replace(/&quot;|&#34;/gi, '"')
+      .replace(/&#39;|&apos;/gi, "'")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
   function chips(items, soft = false) {
     if (!items || !items.length) return `<span class="chip soft">none</span>`;
     return items.map((item) => `<span class="chip${soft ? " soft" : ""}">${escapeHtml(item)}</span>`).join("");
@@ -196,8 +240,10 @@
       $("progress-bar").style.width = pct + "%";
       return;
     }
-    if (/scanning ports/i.test(progress || "")) $("progress-bar").style.width = "90%";
-    if (/enriching/i.test(progress || "")) $("progress-bar").style.width = "96%";
+    if (/scanning ports/i.test(progress || "")) $("progress-bar").style.width = "88%";
+    if (/enriching/i.test(progress || "")) $("progress-bar").style.width = "92%";
+    if (/resolving hostnames/i.test(progress || "")) $("progress-bar").style.width = "95%";
+    if (/lan identity/i.test(progress || "")) $("progress-bar").style.width = "98%";
     if (/done/i.test(progress || "")) $("progress-bar").style.width = "100%";
   }
 
@@ -287,7 +333,7 @@
     priv.classList.toggle("is-elevated", elevated);
     priv.classList.toggle("is-standard", !elevated);
     priv.title = elevated
-      ? "This process has elevated privileges. Deep discovery can use ping."
+      ? "This process has elevated privileges. Deep discovery can use ping (and ARP on Linux/macOS)."
       : elevationHowTo(os).detail;
 
     $("custom-optin").checked = !!session.customOptIn;
@@ -298,7 +344,10 @@
     const deepHint = $("deep-hint");
     deepHint.hidden = false;
     if (elevated) {
-      deepHint.textContent = "Ready — ping available with your current privileges.";
+      deepHint.textContent =
+        os === "windows"
+          ? "Ready — ping available with your current privileges."
+          : "Ready — ping and ARP available with your current privileges.";
     } else if (os === "windows") {
       deepHint.innerHTML = `Ping may still work without Admin. Prefer <button type="button" class="text-link" id="priv-help-link">${escapeHtml(how.short)}</button> for quieter devices.`;
     } else {
@@ -373,7 +422,7 @@
         </div>
         <p class="priv-card-help">${
           isElevated
-            ? "Deep discovery can use ICMP ping with your current privileges."
+            ? "Deep discovery can use ICMP ping (and ARP on Linux/macOS) with your current privileges."
             : escapeHtml(how.detail)
         }</p>
       </div>
@@ -425,20 +474,41 @@
   function portPill(op) {
     const help = portTipText(op);
     const label = `${op.port}/${op.service || "service"}`;
-    const tipAttr = escapeHtml(help).replace(/\n/g, " · ");
-    return `<span class="port-pill" tabindex="0" data-tip="${tipAttr}" aria-label="${escapeHtml(label)}: ${tipAttr}"><span class="port-pill-label">${escapeHtml(label)}</span></span>`;
+    const tip = tipAttr(help);
+    return `<span class="port-pill" tabindex="0" data-tip="${tip}" aria-label="${escapeHtml(label)}: ${tip}"><span class="port-pill-label">${escapeHtml(label)}</span></span>`;
   }
 
-  function renderPortsCompact(ports, hostIp, limit = 4) {
-    if (!ports.length) return `<span class="muted">—</span>`;
+  function renderPortsCompact(ports, hostIp, limit = 5) {
+    if (!ports.length) {
+      return `<span class="cell-empty" tabindex="0" data-tip="${tipAttr(
+        "No services from the findings list answered. The device can still be alive — try Deep discovery, or it may simply have few open ports."
+      )}">None yet</span>`;
+    }
     const shown = ports.slice(0, limit);
     const rest = ports.length - shown.length;
     let html = `<div class="port-list">${shown.map(portPill).join("")}`;
     if (rest > 0) {
-      html += `<button type="button" class="port-more" data-host-ip="${escapeHtml(hostIp || "")}" aria-label="Show ${rest} more ports">+${rest}</button>`;
+      html += `<button type="button" class="port-more" data-host-ip="${escapeHtml(hostIp || "")}" aria-label="Show ${rest} more ports" data-tip="${tipAttr(
+        `Click to show ${rest} more open port${rest === 1 ? "" : "s"} on this device.`
+      )}">+${rest}</button>`;
     }
     html += `</div>`;
     return html;
+  }
+
+  function renderAliveVia(via) {
+    const items = via || [];
+    if (!items.length) {
+      return `<span class="cell-empty" tabindex="0" data-tip="${tipAttr(
+        "We don’t know which discovery method found this host."
+      )}">—</span>`;
+    }
+    return `<div class="via-list">${items
+      .map((v) => {
+        const tip = tipAttr(viaTipText(v));
+        return `<span class="via-chip" tabindex="0" data-tip="${tip}" aria-label="${escapeHtml(v)}: ${tip}">${escapeHtml(v)}</span>`;
+      })
+      .join("")}</div>`;
   }
 
   const floatTip = $("float-tip");
@@ -474,7 +544,7 @@
     floatTip.style.top = `${Math.round(top)}px`;
   }
 
-  function bindPortTips(root) {
+  function bindFloatTips(root) {
     root.querySelectorAll("[data-tip]").forEach((el) => {
       el.addEventListener("mouseenter", () => showFloatTip(el));
       el.addEventListener("mouseleave", hideFloatTip);
@@ -514,7 +584,9 @@
     const hints = (ports || [])
       .flatMap((p) => [p.httpTitle, p.httpServer, p.tlsCommonName, p.banner, p.service])
       .filter(Boolean);
-    const blob = [h.ip, h.mac, h.vendor, h.hostname, ...hints].join(" ").toLowerCase();
+    const blob = [h.ip, h.mac, h.vendor, h.hostname, h.upnpFriendlyName, h.snmpSysDescr, ...hints]
+      .join(" ")
+      .toLowerCase();
     return blob.includes(q);
   }
 
@@ -631,19 +703,77 @@
         const hostFindings = findingsForHost(findings, h.ip);
         const sev = countFindingsBySev(hostFindings);
         const badges = [];
-        if (h.isSelf) badges.push(`<span class="tag-pill self">This device</span>`);
-        if (h.isGateway) badges.push(`<span class="tag-pill gw">Gateway</span>`);
-        if (h.likelyRouterGuess) badges.push(`<span class="tag-pill guess" title="Common router address (guess)">Router?</span>`);
-        if (sev.critical) badges.push(`<button type="button" class="tag-pill risk critical" data-open-risks="${escapeHtml(h.ip)}">${sev.critical} crit</button>`);
-        else if (sev.high) badges.push(`<button type="button" class="tag-pill risk high" data-open-risks="${escapeHtml(h.ip)}">${sev.high} high</button>`);
-        else if (hostFindings.length) badges.push(`<button type="button" class="tag-pill risk" data-open-risks="${escapeHtml(h.ip)}">${hostFindings.length}</button>`);
+        if (h.isSelf) {
+          badges.push(
+            `<span class="tag-pill self" tabindex="0" data-tip="${tipAttr(
+              "This is the computer running Network Sweeper (one of its own addresses)."
+            )}">This device</span>`
+          );
+        }
+        if (h.isGateway) {
+          badges.push(
+            `<span class="tag-pill gw" tabindex="0" data-tip="${tipAttr(
+              "Likely your router / default gateway — the device other hosts use to reach the internet."
+            )}">Gateway</span>`
+          );
+        }
+        if (h.likelyRouterGuess) {
+          badges.push(
+            `<span class="tag-pill guess" tabindex="0" data-tip="${tipAttr(
+              "Common home-router address pattern (guess only). Confirm in your router settings if unsure."
+            )}">Router?</span>`
+          );
+        }
+        if (sev.critical) {
+          badges.push(
+            `<button type="button" class="tag-pill risk critical" data-open-risks="${escapeHtml(h.ip)}" data-tip="${tipAttr(
+              `${sev.critical} critical finding${sev.critical === 1 ? "" : "s"}. Click to review.`
+            )}">${sev.critical} crit</button>`
+          );
+        } else if (sev.high) {
+          badges.push(
+            `<button type="button" class="tag-pill risk high" data-open-risks="${escapeHtml(h.ip)}" data-tip="${tipAttr(
+              `${sev.high} high-severity finding${sev.high === 1 ? "" : "s"}. Click to review.`
+            )}">${sev.high} high</button>`
+          );
+        } else if (hostFindings.length) {
+          badges.push(
+            `<button type="button" class="tag-pill risk" data-open-risks="${escapeHtml(h.ip)}" data-tip="${tipAttr(
+              `${hostFindings.length} security finding${hostFindings.length === 1 ? "" : "s"}. Click to review.`
+            )}">${hostFindings.length}</button>`
+          );
+        }
 
-        const hint = identityHintFromPorts(ports);
-        const namePrimary = h.hostname || hint || h.vendor || "";
+        const hint = humanizeText(identityHintFromHost(h, ports));
+        const vendor = humanizeText(h.vendor || "");
+        const hostname = humanizeText(h.hostname || "");
+        const namePrimary = hostname || hint || vendor || "";
         const secondaryParts = [];
-        if (h.hostname && hint) secondaryParts.push(hint);
-        if (h.vendor && namePrimary !== h.vendor) secondaryParts.push(h.vendor);
+        if (hostname && hint && hint !== hostname) secondaryParts.push(hint);
+        if (vendor && vendor !== namePrimary) secondaryParts.push(vendor);
         const nameSecondary = secondaryParts.join(" · ");
+        const nameTip = namePrimary
+          ? tipAttr(
+              [
+                hostname ? `Hostname: ${hostname}` : "",
+                hint && hint !== hostname ? `Identity hint: ${hint}` : "",
+                vendor ? `Vendor (from MAC): ${vendor}` : "",
+              ]
+                .filter(Boolean)
+                .join("\n") || namePrimary
+            )
+          : tipAttr(
+              "No hostname, vendor, or service hint yet. Names come from reverse DNS, NetBIOS, mDNS, or device ads (UPnP/SNMP)."
+            );
+        const namePrimaryHtml = namePrimary
+          ? `<div class="name-primary" tabindex="0" data-tip="${nameTip}" title="${escapeHtml(namePrimary)}">${escapeHtml(namePrimary)}</div>`
+          : `<div class="name-primary name-empty" tabindex="0" data-tip="${nameTip}">Unknown</div>`;
+        const macLabel = h.mac || "No MAC yet";
+        const macTip = h.mac
+          ? tipAttr(`Hardware (MAC) address ${h.mac}.${vendor ? ` Vendor lookup: ${vendor}.` : " No vendor match in the offline OUI map."}`)
+          : tipAttr(
+              "No MAC address in the ARP cache yet. MACs appear after the OS talks to the host on this LAN; some adapters or isolation modes never show one."
+            );
 
         return `<tr>
           <td class="col-device">
@@ -653,15 +783,15 @@
               <span class="badge-row">${badges.join("")}</span>
             </div>
             <div class="device-mac mono">
-              <span>${escapeHtml(h.mac || "No MAC yet")}</span>
+              <span tabindex="0" data-tip="${macTip}">${escapeHtml(macLabel)}</span>
               ${copyBtn(h.mac, "MAC")}
             </div>
           </td>
           <td class="col-name">
-            <div class="name-primary">${escapeHtml(namePrimary || "—")}</div>
-            ${nameSecondary ? `<div class="name-secondary">${escapeHtml(nameSecondary)}</div>` : ""}
+            ${namePrimaryHtml}
+            ${nameSecondary ? `<div class="name-secondary" tabindex="0" data-tip="${tipAttr(nameSecondary)}" title="${escapeHtml(nameSecondary)}">${escapeHtml(nameSecondary)}</div>` : ""}
           </td>
-          <td class="col-via mono">${escapeHtml((h.aliveVia || []).join(", ") || "—")}</td>
+          <td class="col-via">${renderAliveVia(h.aliveVia)}</td>
           <td class="col-ports">${renderPortsCompact(ports, h.ip)}</td>
         </tr>`;
       })
@@ -676,7 +806,10 @@
         <col class="c-ports" />
       </colgroup>
       <thead><tr>
-        <th>Device</th><th>Name / vendor</th><th title="How the host responded">Found via</th><th>Open ports <span class="th-hint">(hover for help)</span></th>
+        <th>Device</th>
+        <th>Name / vendor <span class="th-hint">(hover for help)</span></th>
+        <th>Found via <span class="th-hint">(hover for help)</span></th>
+        <th>Open ports <span class="th-hint">(hover for help)</span></th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table></div>`;
@@ -699,10 +832,10 @@
         const ports = portsByIP[btn.dataset.hostIp] || [];
         list.innerHTML = ports.map(portPill).join("");
         list.dataset.expanded = "1";
-        bindPortTips(list);
+        bindFloatTips(list);
       });
     });
-    bindPortTips($("hosts"));
+    bindFloatTips($("hosts"));
     $("hosts").querySelectorAll("[data-open-risks]").forEach((btn) => {
       btn.addEventListener("click", () => {
         openRiskModal(btn.dataset.openRisks);

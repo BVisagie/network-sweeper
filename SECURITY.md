@@ -12,4 +12,5 @@ Include OS, version (`-no-browser` prints the URL; UI shows the version pill), a
 
 - The local API binds to loopback and uses a per-launch token + Origin checks. Loopback alone is not sufficient against malicious browser pages.
 - Findings are **heuristic and educational**, not proof of exploitability.
+- Soft probes (e.g. SNMP community `public`, SSDP) are single-shot inventory checks — not brute force or exploit modules.
 - Do not send exploit payloads or weaponized scan modules as contributions.

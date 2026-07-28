@@ -315,14 +315,19 @@ func (s *Server) runScan(ctx context.Context, targets []*net.IPNet, deep, custom
 		snap.Targets = append(snap.Targets, t.String())
 	}
 	useICMP := runtime.GOOS == "windows" || (deep && s.Elevated)
-	if useICMP {
-		snap.Warning = "A host that does not accept connections on any discovery port (and is not found via ICMP) will not appear at all."
+	useARP := deep && s.Elevated && discover.ARPSweepSupported()
+	if useICMP || useARP {
+		snap.Warning = "A host that does not accept connections on any discovery port (and is not found via ICMP"
+		if useARP {
+			snap.Warning += "/ARP"
+		}
+		snap.Warning += ") will not appear at all."
 	}
 	if deep && !s.Elevated {
 		if runtime.GOOS == "windows" {
-			snap.Warning += " Deep discovery was requested without Admin; Windows still tries system ping as a best-effort boost. Run as administrator for more reliable quiet-host discovery."
+			snap.Warning += " Deep discovery was requested without Admin; Windows still tries system ping as a best-effort boost. Run as administrator for more reliable quiet-host discovery. Active ARP sweep is not available on Windows in this version."
 		} else {
-			snap.Warning += " Deep discovery requested but process is not elevated; ICMP is skipped. Relaunch with sudo, then enable Deep discovery."
+			snap.Warning += " Deep discovery requested but process is not elevated; ICMP/ARP are skipped. Relaunch with sudo, then enable Deep discovery."
 		}
 	}
 
@@ -331,6 +336,7 @@ func (s *Server) runScan(ctx context.Context, targets []*net.IPNet, deep, custom
 		Targets:     targets,
 		Deep:        deep && s.Elevated,
 		UseICMP:     useICMP,
+		UseARP:      useARP,
 		Concurrency: 128,
 		MaxHosts:    1024,
 		Progress: func(done, total int, msg string) {
@@ -384,6 +390,15 @@ func (s *Server) runScan(ctx context.Context, targets []*net.IPNet, deep, custom
 	s.scanProgress = "enriching services"
 	s.mu.Unlock()
 	ports = enrich.Results(ctx, ports, 800*time.Millisecond, 32)
+	s.mu.Lock()
+	s.scanProgress = "resolving hostnames"
+	s.mu.Unlock()
+	discover.EnrichHostnames(ctx, hosts, 400*time.Millisecond, 32, 1500*time.Millisecond)
+	s.mu.Lock()
+	s.scanProgress = "lan identity probes"
+	s.mu.Unlock()
+	discover.EnrichLANIdentity(ctx, hosts)
+	snap.Hosts = hosts
 	snap.Ports = ports
 	snap.Findings = risk.Evaluate(hosts, ports)
 	snap.FinishedAt = time.Now().UTC()

@@ -33,6 +33,13 @@ func TestSanitizeLineStopsAtNewline(t *testing.T) {
 	}
 }
 
+func TestSanitizeLineDecodesEntities(t *testing.T) {
+	got := sanitizeLine(`32&quot; Odyssey OLED G8`)
+	if got != `32" Odyssey OLED G8` {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestIdentityHint(t *testing.T) {
 	hint := IdentityHint([]scan.OpenPort{
 		{Port: 443, TLSCommonName: "router.local"},
