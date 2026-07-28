@@ -96,6 +96,26 @@ func TestEvaluateGatewayContext(t *testing.T) {
 	}
 }
 
+func TestEvaluateUPnPAndSNMP(t *testing.T) {
+	hosts := []discover.Host{
+		{IP: "10.0.0.5", UPnP: true, UPnPFriendlyName: "Living Room TV", Hostname: "tv"},
+		{IP: "10.0.0.6", SNMPPublic: true, SNMPSysDescr: "Printer", Hostname: "printer"},
+	}
+	f := Evaluate(hosts, nil)
+	var upnp, snmp bool
+	for _, x := range f {
+		if x.ID == "upnp-ssdp-10.0.0.5" {
+			upnp = true
+		}
+		if x.ID == "snmp-public-10.0.0.6" && x.Severity == SeverityMedium && x.Port == 161 {
+			snmp = true
+		}
+	}
+	if !upnp || !snmp {
+		t.Fatalf("upnp=%v snmp=%v findings=%v", upnp, snmp, f)
+	}
+}
+
 func TestEvaluateTLSEnrichment(t *testing.T) {
 	hosts := []discover.Host{{IP: "10.0.0.8", Hostname: "nas"}}
 	results := []scan.Result{{

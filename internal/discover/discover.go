@@ -13,15 +13,19 @@ import (
 
 // Host is a discovered live host.
 type Host struct {
-	IP               string    `json:"ip"`
-	MAC              string    `json:"mac,omitempty"`
-	Vendor           string    `json:"vendor,omitempty"`
-	Hostname         string    `json:"hostname,omitempty"`
-	AliveVia         []string  `json:"aliveVia"`
-	LastSeen         time.Time `json:"lastSeen"`
-	IsSelf           bool      `json:"isSelf,omitempty"`
-	IsGateway        bool      `json:"isGateway,omitempty"`
-	LikelyRouterGuess bool     `json:"likelyRouterGuess,omitempty"`
+	IP                string    `json:"ip"`
+	MAC               string    `json:"mac,omitempty"`
+	Vendor            string    `json:"vendor,omitempty"`
+	Hostname          string    `json:"hostname,omitempty"`
+	AliveVia          []string  `json:"aliveVia"`
+	LastSeen          time.Time `json:"lastSeen"`
+	IsSelf            bool      `json:"isSelf,omitempty"`
+	IsGateway         bool      `json:"isGateway,omitempty"`
+	LikelyRouterGuess bool      `json:"likelyRouterGuess,omitempty"`
+	UPnP              bool      `json:"upnp,omitempty"`
+	UPnPFriendlyName  string    `json:"upnpFriendlyName,omitempty"`
+	SNMPPublic        bool      `json:"snmpPublic,omitempty"`
+	SNMPSysDescr      string    `json:"snmpSysDescr,omitempty"`
 }
 
 // Options controls discovery behavior.
@@ -32,6 +36,7 @@ type Options struct {
 	MaxHosts    int
 	Deep        bool // elevated ICMP path when UseICMP/Deep set by caller
 	UseICMP     bool // also try ICMP (e.g. Windows unprivileged boost)
+	UseARP      bool // elevated active ARP sweep (Unix); ignored when unsupported
 	Progress    func(done, total int, msg string)
 }
 
@@ -160,11 +165,41 @@ func (e *Engine) Discover(ctx context.Context, opt Options) (Result, error) {
 		alive[key] = h
 	}
 
+	if opt.UseARP && ARPSweepSupported() {
+		if opt.Progress != nil {
+			opt.Progress(total, total, "arp sweep")
+		}
+		arpTimeout := opt.Timeout
+		if arpTimeout < time.Second {
+			arpTimeout = 1500 * time.Millisecond
+		}
+		for ip, mac := range SweepARP(ctx, opt.Targets, arpTimeout) {
+			if ctx.Err() != nil {
+				break
+			}
+			if h, ok := alive[ip]; ok {
+				if h.MAC == "" {
+					h.MAC = mac
+				}
+				h.AliveVia = appendUnique(h.AliveVia, "arp")
+				continue
+			}
+			alive[ip] = &Host{
+				IP:       ip,
+				MAC:      mac,
+				AliveVia: []string{"arp"},
+				LastSeen: time.Now(),
+			}
+		}
+	}
+
 	out := make([]Host, 0, len(alive))
 	arpTable := ReadARPTable()
 	for _, h := range alive {
-		if mac, ok := arpTable[h.IP]; ok {
-			h.MAC = mac
+		if h.MAC == "" {
+			if mac, ok := arpTable[h.IP]; ok {
+				h.MAC = mac
+			}
 		}
 		h.Hostname = reverseDNS(ctx, h.IP)
 		out = append(out, *h)

@@ -17,10 +17,10 @@ Local LAN inventory + heuristic exposure findings with an embedded localhost web
 ## Discovery semantics
 
 - Discovery ports ≠ findings ports (coverage vs risk labeling).
-- **Deep discovery** = **ICMP** via system `ping`. On Linux/macOS: Deep checkbox + elevated process. On Windows: ping may run as a boost without elevation (and without Deep).
-- ARP = **cache read only**. Active ARP sweep is **deferred** / not implemented.
-- Never mark unimplemented capabilities as `full` when the process is elevated.
-- Silent/firewalled hosts that miss discovery ports (and ICMP when that path is off/unavailable) may be invisible entirely.
+- **Deep discovery** = **ICMP** via system `ping`, plus **active ARP** on elevated Linux/macOS. On Windows: ping may run as a boost without elevation (and without Deep); active ARP is deferred.
+- ARP **cache** enrichment runs on all OSes after contact. Active ARP sweep is Unix Deep+elevated only.
+- Never mark unimplemented capabilities as `full` when the process is elevated (Windows ARP stays `deferred`).
+- Silent/firewalled hosts that miss discovery ports (and ICMP/ARP when those paths are off/unavailable) may be invisible entirely.
 
 ## Stack
 
@@ -46,9 +46,11 @@ Local LAN inventory + heuristic exposure findings with an embedded localhost web
 When capabilities change, update together:
 
 - `docs/PLATFORM.md`
-- `README.md` (features / troubleshooting)
+- `docs/ARCHITECTURE.md` (scan flow / package map)
+- `README.md` (features / troubleshooting / elevation)
 - Limitations UI copy / `internal/platform.Snapshot`
 - Elevation how-tos (Windows Run as administrator; macOS/Linux `sudo`)
+- `CONTRIBUTING.md` discovery-honesty bullet if semantics change
 
 ## Scope and license
 

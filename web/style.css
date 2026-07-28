@@ -780,19 +780,20 @@ table.hosts-table {
   font-size: 0.86rem;
 }
 
-.hosts-table .c-device { width: 34%; }
-.hosts-table .c-name { width: 22%; }
-.hosts-table .c-via { width: 12%; }
-.hosts-table .c-ports { width: 32%; }
+.hosts-table .c-device { width: 30%; }
+.hosts-table .c-name { width: 26%; }
+.hosts-table .c-via { width: 14%; }
+.hosts-table .c-ports { width: 30%; }
 
-th, td {
-  padding: 0.55rem 0.75rem;
+.hosts-table th,
+.hosts-table td {
+  padding: 0.85rem 0.85rem;
   text-align: left;
-  vertical-align: middle;
+  vertical-align: top;
   border-bottom: 1px solid var(--line);
 }
 
-th {
+.hosts-table th {
   position: sticky;
   top: 0;
   z-index: 1;
@@ -802,6 +803,8 @@ th {
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+  padding-top: 0.7rem;
+  padding-bottom: 0.7rem;
 }
 
 .th-hint {
@@ -812,33 +815,78 @@ th {
   opacity: 0.8;
 }
 
-tbody tr {
+.hosts-table tbody tr {
   transition: background 0.15s ease;
 }
 
-tbody tr:hover { background: rgba(62, 207, 142, 0.05); }
+.hosts-table tbody tr:hover { background: rgba(62, 207, 142, 0.05); }
 
-tbody tr:hover .copy-btn {
+.hosts-table tbody tr:hover .copy-btn {
   opacity: 1;
 }
 
-td.mono,
-.device-mac,
-.col-via {
+.hosts-table td.mono,
+.hosts-table .device-mac {
   font-family: var(--mono);
   font-size: 0.78rem;
 }
 
 .col-via {
   color: var(--muted);
+}
+
+.via-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: flex-start;
+}
+
+.via-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.18rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--muted);
+  line-height: 1.2;
   white-space: nowrap;
+  cursor: help;
+}
+
+.via-chip:hover,
+.via-chip:focus-visible {
+  color: var(--fg);
+  border-color: var(--line-strong);
+  background: rgba(62, 207, 142, 0.08);
+  outline: none;
+}
+
+.tag-pill[data-tip],
+.name-primary[data-tip],
+.name-secondary[data-tip],
+.device-mac [data-tip],
+.cell-empty[data-tip] {
+  cursor: help;
+}
+
+.tag-pill[data-tip]:focus-visible,
+.name-primary[data-tip]:focus-visible,
+.name-secondary[data-tip]:focus-visible,
+.device-mac [data-tip]:focus-visible,
+.cell-empty[data-tip]:focus-visible {
+  outline: 1px solid rgba(62, 207, 142, 0.45);
+  outline-offset: 2px;
 }
 
 .device-primary {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.35rem 0.4rem;
+  gap: 0.4rem 0.45rem;
   min-width: 0;
 }
 
@@ -852,44 +900,63 @@ td.mono,
   display: flex;
   align-items: center;
   gap: 0.3rem;
-  margin-top: 0.2rem;
+  margin-top: 0.35rem;
   color: var(--faint);
   font-size: 0.72rem;
 }
 
+.col-name {
+  min-width: 0;
+}
+
 .name-primary {
   color: var(--fg);
-  font-size: 0.88rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.35;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.name-secondary {
-  margin-top: 0.15rem;
+.name-primary.name-empty,
+.cell-empty {
   color: var(--faint);
-  font-size: 0.75rem;
+  font-weight: 500;
+  font-style: normal;
+}
+
+.name-secondary {
+  margin-top: 0.3rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.col-ports {
+  min-width: 0;
 }
 
 .port-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.3rem;
+  gap: 0.4rem;
   align-items: center;
 }
 
 .port-pill {
   position: relative;
   display: inline-flex;
-  padding: 0.14rem 0.4rem;
-  border-radius: 5px;
+  padding: 0.22rem 0.5rem;
+  border-radius: 6px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--line);
   font-family: var(--mono);
-  font-size: 0.68rem;
+  font-size: 0.7rem;
+  line-height: 1.25;
   color: var(--muted);
   white-space: nowrap;
   cursor: help;
@@ -921,14 +988,22 @@ td.mono,
 .float-tip[hidden] { display: none; }
 
 .port-more {
-  min-height: 1.35rem;
-  padding: 0.1rem 0.4rem;
-  border-radius: 5px;
+  min-height: 1.5rem;
+  padding: 0.18rem 0.5rem;
+  border-radius: 6px;
   font-family: var(--mono);
-  font-size: 0.68rem;
+  font-size: 0.7rem;
+  line-height: 1.25;
   color: var(--accent);
   background: rgba(62, 207, 142, 0.08);
   border: 1px solid rgba(62, 207, 142, 0.28);
+  cursor: pointer;
+}
+
+.port-more:hover,
+.port-more:focus-visible {
+  background: rgba(62, 207, 142, 0.14);
+  outline: none;
 }
 
 .port-inline {
