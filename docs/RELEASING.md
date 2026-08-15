@@ -32,6 +32,13 @@ From `make cross` / release workflow:
 
 Version is injected via ldflags into `internal/version.Version` (tag without leading `v`).
 
+The Linux one-liner (`scripts/install.sh`) downloads:
+
+- `https://github.com/BVisagie/network-sweeper/releases/latest/download/network-sweeper-linux-<arch>`
+- `…/SHA256SUMS`
+
+Keep those asset names stable. Until a non-draft release exists, the launcher fails with a plain-language message (not raw API JSON). Smoke-test `bash scripts/install.sh --help` and, after publishing, `--ephemeral --no-browser`.
+
 ## Update-check happy path
 
 `POST /api/update` (opt-in) calls `https://api.github.com/repos/BVisagie/network-sweeper/releases/latest`.

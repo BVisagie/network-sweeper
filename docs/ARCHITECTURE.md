@@ -6,6 +6,7 @@ Network Sweeper is a stdlib-only Go program: one binary embeds a localhost web U
 
 ```
 cmd/networksweeper     CLI entry: flags, start API, open browser, signal shutdown
+scripts/install.sh     Linux curl|bash launcher + launch menu (not a scan UI)
 internal/api           Localhost HTTP, token/Origin hardening, scan orchestration, export
 internal/discover      TCP discovery, optional ICMP/ARP, ARP cache MAC, reverse DNS,
                        NetBIOS/mDNS hostname fill, SSDP + SNMP soft probes
@@ -30,6 +31,10 @@ web/                   Embedded UI (index.html, style.css, app.js) via embed.FS
 6. `discover.EnrichHostnames` fills empty names via NetBIOS then mDNS.
 7. `discover.EnrichLANIdentity` runs SSDP (known hosts) then SNMP `public` soft probe.
 8. `risk.Evaluate` builds findings; snapshot stored for UI/export (`POST /api/scan/cancel` aborts an in-flight run).
+
+## Linux launcher
+
+`scripts/install.sh` is a bootstrap, not a second product UI. It downloads a GitHub Release binary, verifies `SHA256SUMS`, then either runs once from a temp dir (default) or copies `network-sweeper` to a prefix. Interactive prompts read `/dev/tty` so `curl | bash` still works. The dashboard remains the embedded localhost web UI.
 
 ## Local API security
 
