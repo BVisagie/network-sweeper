@@ -49,4 +49,4 @@ Keep those asset names stable. Until a non-draft release exists, the launcher fa
 
 ## Signing
 
-Code signing / notarization is deferred. Document “allow anyway” steps in README and `docs/PLATFORM.md`. Checksums are the trust bridge for v1 testers.
+Code signing / notarization is deferred. Document “allow anyway” steps in [linux.md](linux.md), [windows.md](windows.md), [macos.md](macos.md), and [PLATFORM.md](PLATFORM.md). Checksums are the trust bridge for v1 testers.
