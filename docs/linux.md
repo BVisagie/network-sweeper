@@ -23,9 +23,9 @@ curl -fsSL https://raw.githubusercontent.com/BVisagie/network-sweeper/main/scrip
 
 The launcher shows a short menu. **Enter** (option 1) downloads the latest GitHub Release, verifies `SHA256SUMS`, and **runs once from a temp directory** (nothing left on `PATH`). Your browser opens the same localhost dashboard as a normal run.
 
-Option 2 installs `network-sweeper` to `~/.local/bin` or a path you type, then **install and launch** or **install only**.
+Option 2 runs that verified binary with `sudo` (Deep discovery). Option 3 installs `network-sweeper` to `~/.local/bin` or a path you type, then **install and launch** or **install only**.
 
-Do **not** pipe the script through `sudo`. After a persistent install, Deep discovery is:
+`sudo curl … | bash` only elevates `curl`, not the app. Do **not** `curl | sudo bash` (that runs the installer as root). Elevate the verified binary instead — menu option 2, `--sudo`, or after a persistent install:
 
 ```bash
 sudo network-sweeper
@@ -44,6 +44,9 @@ Non-interactive examples (skips the menu):
 ```bash
 # Run once (same as a non-TTY default)
 curl -fsSL https://raw.githubusercontent.com/BVisagie/network-sweeper/main/scripts/install.sh | bash -s -- --ephemeral
+
+# Run once with sudo (Deep discovery; elevates the verified binary, not the script)
+curl -fsSL https://raw.githubusercontent.com/BVisagie/network-sweeper/main/scripts/install.sh | bash -s -- --sudo
 
 # Install to ~/.local/bin and launch
 curl -fsSL https://raw.githubusercontent.com/BVisagie/network-sweeper/main/scripts/install.sh | bash -s -- --install
@@ -83,6 +86,8 @@ The one-liner verifies the matching Linux asset before run or install. On mismat
 
 Deep discovery on Linux is **ICMP via system `ping` plus an active ARP sweep**. It needs **both** `sudo` **and** the Deep checkbox on Overview (not inside Advanced options).
 
+From the one-liner, choose **Run once with sudo** or pass `--sudo` (the launcher runs the checksum-verified binary with sudo, not the script). You can also:
+
 ```bash
 sudo ./network-sweeper-linux-amd64
 # after a persistent install:
@@ -97,6 +102,7 @@ TCP discovery and findings scans work without elevation. Full matrix: [PLATFORM.
 |---|---|
 | Browser didn’t open | Run with `-no-browser` and open the printed `http://127.0.0.1:…` URL (`xdg-open` may be missing) |
 | One-liner fails | Needs a published GitHub Release + `SHA256SUMS`; inspect `scripts/install.sh` first; do not `curl \| sudo bash` |
+| `sudo curl … \| bash` still shows not elevated | `sudo` only applies to `curl`. Choose **Run once with sudo**, pass `--sudo`, or install then `sudo network-sweeper`. If you just used `sudo curl`, the launcher offers to elevate when credentials are still cached |
 | Checksum mismatch | The launcher refuses to run. Re-download, or install a verified asset from Releases by hand |
 | Zero hosts | Guest Wi‑Fi or AP isolation; try Deep discovery with `sudo` and the Deep checkbox; confirm subnet |
 | Deep discovery seems ignored | Needs `sudo` **and** the Deep checkbox (then ICMP + ARP). Check the Elevated badge and Limitations tab |

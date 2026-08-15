@@ -14,7 +14,7 @@ Linux:
 curl -fsSL https://raw.githubusercontent.com/BVisagie/network-sweeper/main/scripts/install.sh | bash
 ```
 
-Do not pipe that through `sudo`. Menu, checksums, and Deep discovery: [docs/linux.md](docs/linux.md).
+Do not pipe that through `sudo` (`sudo curl | bash` only elevates curl; `curl | sudo bash` runs the installer as root). Menu option 2 / `--sudo` elevates the verified binary. Checksums and Deep discovery: [docs/linux.md](docs/linux.md).
 
 Windows and macOS: download the matching asset from [Releases](https://github.com/BVisagie/network-sweeper/releases) and follow [docs/windows.md](docs/windows.md) or [docs/macos.md](docs/macos.md). No Go, Node, or nmap required to run a prebuilt binary.
 

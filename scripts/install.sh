@@ -17,6 +17,7 @@ LAUNCH=1         # 0 = install only
 PREFIX=""
 NO_BROWSER=0
 SKIP_MENU=0
+WANT_SUDO=0      # 1 = --sudo or menu “run once with sudo”
 WORKDIR=""
 
 # UI palette matches web/style.css (--accent #3ecf8e, --fg #e7f2ec, --muted, --danger).
@@ -49,10 +50,14 @@ Options:
   --install         Install to --prefix (or ~/.local/bin) and launch
   --install-only    Install to --prefix (or ~/.local/bin) and exit
   --prefix DIR      Install directory (implies install, not ephemeral)
+  --sudo            After verify, launch the binary with sudo (not this script)
   --no-browser      Pass -no-browser to the binary (also auto on headless)
   -h, --help        Show this help
 
-Do not pipe this script through sudo. After a persistent install:
+sudo curl | bash only elevates curl, not this app. Do not curl | sudo bash
+(that runs the installer as root). Elevate the verified binary instead:
+  curl -fsSL …/install.sh | bash -s -- --sudo
+After a persistent install:
   sudo network-sweeper
 EOF
 }
@@ -143,6 +148,33 @@ cancel_ui() {
 	exit 0
 }
 
+# prompt_yn MESSAGE DEFAULT  → prints y or n (empty input = DEFAULT; DEFAULT is y or n)
+prompt_yn() {
+	local message=$1 default=$2
+	local reply cleaned
+	while true; do
+		ui "$message"
+		reply=$(read_tty)
+		cleaned=${reply//[[:space:]]/}
+		if [[ -z "$cleaned" ]]; then
+			printf '%s' "$default"
+			return
+		fi
+		if [[ "$cleaned" == [qQ] ]]; then
+			cancel_ui
+		fi
+		if [[ "$cleaned" == [yY] || "$cleaned" == [yY][eE][sS] ]]; then
+			printf 'y'
+			return
+		fi
+		if [[ "$cleaned" == [nN] || "$cleaned" == [nN][oO] ]]; then
+			printf 'n'
+			return
+		fi
+		ui_nl "${DANGER}Please enter y or n (or q to cancel).${RESET}"
+	done
+}
+
 # prompt_choice MESSAGE DEFAULT MAX  → prints 1..MAX (empty input = DEFAULT)
 prompt_choice() {
 	local message=$1 default=$2 max=$3
@@ -178,17 +210,23 @@ interactive_menu() {
 	banner
 	ui_nl "  ${FG}How would you like to proceed?${RESET}"
 	ui_nl ""
-	ui_nl "    ${ACCENT}1)${RESET}  ${FG}Run once (ephemeral)${RESET}     ${MUTED}default — nothing left on PATH${RESET}"
-	ui_nl "    ${FG}2)${RESET}  ${FG}Install to a directory${RESET}   ${MUTED}keep network-sweeper for later${RESET}"
+	ui_nl "    ${ACCENT}1)${RESET}  ${FG}Run once (ephemeral)${RESET}           ${MUTED}default — nothing left on PATH${RESET}"
+	ui_nl "    ${FG}2)${RESET}  ${FG}Run once with sudo${RESET}             ${MUTED}Deep discovery (ICMP + ARP)${RESET}"
+	ui_nl "    ${FG}3)${RESET}  ${FG}Install to a directory${RESET}         ${MUTED}keep network-sweeper for later${RESET}"
 	ui_nl ""
-	ui_nl "  ${MUTED}Deep discovery (ICMP + ARP) needs a persistent install, then: sudo network-sweeper${RESET}"
+	ui_nl "  ${MUTED}sudo curl | bash only elevates curl. Choose 2, or install then: sudo network-sweeper${RESET}"
 	ui_nl "  ${MUTED}q to cancel${RESET}"
 	ui_nl ""
 	local step1
-	step1=$(prompt_choice "  ${ACCENT}Choice [1]:${RESET} " 1 2)
+	step1=$(prompt_choice "  ${ACCENT}Choice [1]:${RESET} " 1 3)
 	ui_nl ""
 	if [[ "$step1" == 1 ]]; then
 		MODE=ephemeral
+		return
+	fi
+	if [[ "$step1" == 2 ]]; then
+		MODE=ephemeral
+		WANT_SUDO=1
 		return
 	fi
 
@@ -271,6 +309,11 @@ parse_args() {
 			SKIP_MENU=1
 			shift 2
 			;;
+		--sudo)
+			WANT_SUDO=1
+			SKIP_MENU=1
+			shift
+			;;
 		--no-browser)
 			NO_BROWSER=1
 			shift
@@ -280,6 +323,9 @@ parse_args() {
 			;;
 		esac
 	done
+	if [[ "$WANT_SUDO" -eq 1 && "$LAUNCH" -eq 0 ]]; then
+		die "--sudo cannot be combined with --install-only"
+	fi
 }
 
 require_linux() {
@@ -338,16 +384,95 @@ path_hint() {
 	info "  export PATH=\"${dir}:\$PATH\""
 }
 
+sudo_cached() {
+	command -v sudo >/dev/null || return 1
+	sudo -n true >/dev/null 2>&1
+}
+
+note_no_browser() {
+	if want_no_browser && no_display && [[ "$NO_BROWSER" -ne 1 ]]; then
+		info "No display detected; dashboard URL will print below (loopback only)."
+	fi
+}
+
+# When sudo credentials are cached (typical after `sudo curl | bash`), offer to
+# elevate the verified binary. Otherwise print a one-line unprivileged notice.
+maybe_want_sudo() {
+	if [[ "$(id -u)" -eq 0 ]]; then
+		WANT_SUDO=0
+		return
+	fi
+	if [[ "$WANT_SUDO" -eq 1 ]]; then
+		return
+	fi
+	if has_tty && sudo_cached; then
+		ui_nl ""
+		ui_nl "  ${FG}sudo curl | bash only elevates curl, not this app.${RESET}"
+		ui_nl "  ${MUTED}Launch the verified binary with sudo for Deep discovery?${RESET}"
+		ui_nl ""
+		local yn
+		yn=$(prompt_yn "  ${ACCENT}Launch with sudo [Y/n]:${RESET} " y)
+		ui_nl ""
+		if [[ "$yn" == y ]]; then
+			WANT_SUDO=1
+		fi
+		return
+	fi
+	info "This session is not elevated. Deep discovery: re-run with --sudo, or sudo network-sweeper after install."
+}
+
+run_sudo() {
+	local bin=$1
+	local do_exec=$2
+	command -v sudo >/dev/null || die "sudo is required to elevate"
+	info "Launching the verified binary with sudo (not the installer script)."
+	info "Opening a browser may fail; the dashboard URL prints below."
+	note_no_browser
+	if [[ "$do_exec" -eq 1 ]]; then
+		if want_no_browser; then
+			exec sudo --preserve-env=DISPLAY,WAYLAND_DISPLAY,XDG_RUNTIME_DIR -- "$bin" -no-browser || die "Failed to launch ${bin}"
+		fi
+		exec sudo --preserve-env=DISPLAY,WAYLAND_DISPLAY,XDG_RUNTIME_DIR -- "$bin" || die "Failed to launch ${bin}"
+	fi
+	if want_no_browser; then
+		sudo --preserve-env=DISPLAY,WAYLAND_DISPLAY,XDG_RUNTIME_DIR -- "$bin" -no-browser
+	else
+		sudo --preserve-env=DISPLAY,WAYLAND_DISPLAY,XDG_RUNTIME_DIR -- "$bin"
+	fi
+}
+
 run_binary() {
 	local bin=$1
+	note_no_browser
 	if want_no_browser; then
-		if no_display && [[ "$NO_BROWSER" -ne 1 ]]; then
-			info "No display detected; dashboard URL will print below (loopback only)."
-		fi
 		"$bin" -no-browser
 	else
 		"$bin"
 	fi
+}
+
+# do_exec=1 replaces this process (install+launch). Ephemeral must wait so cleanup runs.
+launch_binary() {
+	local bin=$1
+	local do_exec=$2
+	if [[ "$(id -u)" -eq 0 ]]; then
+		WANT_SUDO=0
+		info "Running as root. Opening a browser may fail; the dashboard URL prints below."
+	else
+		maybe_want_sudo
+	fi
+	if [[ "$WANT_SUDO" -eq 1 ]]; then
+		run_sudo "$bin" "$do_exec"
+		return
+	fi
+	if [[ "$do_exec" -eq 1 ]]; then
+		note_no_browser
+		if want_no_browser; then
+			exec "$bin" -no-browser || die "Failed to launch ${bin}"
+		fi
+		exec "$bin" || die "Failed to launch ${bin}"
+	fi
+	run_binary "$bin"
 }
 
 # Prints the installed path on stdout only.
@@ -396,10 +521,7 @@ main() {
 
 	if [[ "$MODE" == ephemeral ]]; then
 		ok "Running once from a temp directory (not installed)."
-		if [[ "$(id -u)" -eq 0 ]]; then
-			info "Running as root. Opening a browser may fail; the dashboard URL prints below."
-		fi
-		run_binary "$verified"
+		launch_binary "$verified" 0
 		return
 	fi
 
@@ -411,13 +533,7 @@ main() {
 	cleanup
 	WORKDIR=""
 	trap - EXIT INT TERM
-	if want_no_browser; then
-		if no_display && [[ "$NO_BROWSER" -ne 1 ]]; then
-			info "No display detected; dashboard URL will print below (loopback only)."
-		fi
-		exec "$installed" -no-browser || die "Failed to launch ${installed}"
-	fi
-	exec "$installed" || die "Failed to launch ${installed}"
+	launch_binary "$installed" 1
 }
 
 main "$@"

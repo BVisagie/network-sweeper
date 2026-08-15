@@ -34,7 +34,7 @@ web/                   Embedded UI (index.html, style.css, app.js) via embed.FS
 
 ## Linux launcher
 
-`scripts/install.sh` is a bootstrap, not a second product UI. It downloads a GitHub Release binary, verifies `SHA256SUMS`, then either runs once from a temp dir (default) or copies `network-sweeper` to a prefix. Interactive prompts read `/dev/tty` so `curl | bash` still works. The dashboard remains the embedded localhost web UI. End-user steps: [linux.md](linux.md).
+`scripts/install.sh` is a bootstrap, not a second product UI. It downloads a GitHub Release binary, verifies `SHA256SUMS`, then either runs once from a temp dir (default), launches that verified binary with `sudo` (`--sudo` or the interactive Deep-discovery choice), or copies `network-sweeper` to a prefix. Interactive prompts read `/dev/tty` so `curl | bash` still works. The dashboard remains the embedded localhost web UI. End-user steps: [linux.md](linux.md).
 
 ## Local API security
 
