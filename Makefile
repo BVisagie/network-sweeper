@@ -7,6 +7,7 @@ LDFLAGS := -X github.com/BVisagie/network-sweeper/internal/version.Version=$(VER
 
 test:
 	go test ./...
+	bash -n scripts/install.sh
 
 build:
 	mkdir -p bin

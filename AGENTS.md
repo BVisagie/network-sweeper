@@ -30,9 +30,10 @@ Local LAN inventory + heuristic exposure findings with an embedded localhost web
 
 ## Commands
 
-- `make test` — unit tests
+- `make test` — unit tests + `bash -n scripts/install.sh`
 - `make build` / `make run` — local binary
 - `make cross` — release artifacts + `SHA256SUMS`
+- `scripts/install.sh` — Linux curl|bash launcher (ephemeral default; not a scan TUI)
 - Version injected via ldflags into `internal/version.Version`
 
 ## Update check

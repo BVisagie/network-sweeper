@@ -6,6 +6,45 @@ Supported OS: **Windows**, **Linux**, **macOS** (amd64 and arm64 where builds ar
 
 License: [GNU GPL v3](LICENSE) — Copyright (C) 2026 Bernard Visagie ([NOTICE](NOTICE)).
 
+## Quick start (Linux)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/BVisagie/network-sweeper/main/scripts/install.sh | bash
+```
+
+The launcher shows a short menu. **Enter** (option 1) downloads the latest GitHub Release, verifies `SHA256SUMS`, and **runs once from a temp directory** (nothing left on `PATH`). Your browser opens the same localhost dashboard as a normal run.
+
+Option 2 installs `network-sweeper` to `~/.local/bin` or a path you type, then **install and launch** or **install only**.
+
+Do **not** pipe the script through `sudo`. After a persistent install, Deep discovery is:
+
+```bash
+sudo network-sweeper
+```
+
+Prefer to inspect the script first:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/BVisagie/network-sweeper/main/scripts/install.sh -o /tmp/ns-install.sh
+less /tmp/ns-install.sh
+bash /tmp/ns-install.sh
+```
+
+Non-interactive examples (skips the menu):
+
+```bash
+# Run once (same as a non-TTY default)
+curl -fsSL https://raw.githubusercontent.com/BVisagie/network-sweeper/main/scripts/install.sh | bash -s -- --ephemeral
+
+# Install to ~/.local/bin and launch
+curl -fsSL https://raw.githubusercontent.com/BVisagie/network-sweeper/main/scripts/install.sh | bash -s -- --install
+
+# Install only
+curl -fsSL https://raw.githubusercontent.com/BVisagie/network-sweeper/main/scripts/install.sh | bash -s -- --install-only --prefix "$HOME/.local/bin"
+```
+
+On SSH/headless sessions with no display, the launcher passes `-no-browser` and prints the dashboard URL. Windows and macOS: download a release binary below (this one-liner is Linux-only).
+
 ## Client requirements (end users)
 
 For a **prebuilt release binary**, you do **not** need Go, Node, Docker, nmap, or other scan toolchains.
@@ -60,6 +99,8 @@ network-sweeper-windows-amd64.exe -no-browser
 
 ### Linux
 
+The [Quick start](#quick-start-linux) one-liner is the usual path. Manual download:
+
 1. Download `network-sweeper-linux-amd64` or `network-sweeper-linux-arm64`.
 2. Make it executable and run:
 
@@ -103,6 +144,7 @@ sudo ./network-sweeper-darwin-arm64
 Flags:
 
 - `-no-browser` — print the dashboard URL and do not open a browser
+- `-version` — print the version and exit
 
 The app binds **only** to `127.0.0.1` on an ephemeral port and uses a per-launch session token in the UI.
 
@@ -111,6 +153,8 @@ The app binds **only** to `127.0.0.1` on an ephemeral port and uses a per-launch
 | Problem | What to try |
 |---|---|
 | Browser didn’t open | Run with `-no-browser` and open the printed `http://127.0.0.1:…` URL |
+| Linux one-liner fails | Needs a published GitHub Release + `SHA256SUMS`; inspect `scripts/install.sh` first; do not `curl \| sudo bash` |
+| Checksum mismatch | The launcher refuses to run. Re-download, or install a verified asset from Releases by hand |
 | Gatekeeper / SmartScreen | Verify checksums; use OS “Open anyway” / Run anyway steps above |
 | Zero hosts | Guest Wi‑Fi or AP isolation; try Deep discovery (and `sudo` / Run as administrator on macOS/Linux); confirm subnet |
 | Deep discovery seems ignored | On macOS/Linux it needs `sudo` **and** the Deep checkbox (then ICMP + ARP). On Windows, ping may already run without Admin; active ARP is deferred — check the Elevated badge and Limitations tab |
@@ -215,6 +259,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/RELEASING.md](docs/RELEA
 - Server-enforced scan targets: default = detected local subnets; custom CIDR requires Settings opt-in
 - Hardened local API: Origin checks + per-launch token
 - Opt-in “check for updates” (GitHub Releases; default off; contacts GitHub only when enabled)
+- Linux curl|bash launcher (`scripts/install.sh`): ephemeral run by default, optional install to a directory
 - Limitations panel documenting OS gaps (see [docs/PLATFORM.md](docs/PLATFORM.md))
 
 Changelog: GitHub [Releases](https://github.com/BVisagie/network-sweeper/releases).
@@ -223,6 +268,7 @@ Changelog: GitHub [Releases](https://github.com/BVisagie/network-sweeper/release
 
 - Only scan networks you own or are authorized to assess.
 - Loopback bind alone is **not** enough against malicious browser pages; the API requires a session token and validates `Origin`.
+- The Linux one-liner is convenience; checksums of the release binary are the trust bridge — see [SECURITY.md](SECURITY.md).
 - Unsigned binaries may trigger SmartScreen (Windows) or Gatekeeper (macOS). Code signing is deferred for v1 — see PLATFORM.md.
 - Vulnerability reports: see [SECURITY.md](SECURITY.md).
 

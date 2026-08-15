@@ -6,7 +6,15 @@ Network Sweeper is an **active LAN scanner**. Only use it on networks you own or
 
 Please report security issues privately to the repository owner via GitHub Security Advisories (preferred) or by contacting the maintainer listed on the GitHub profile for [BVisagie/network-sweeper](https://github.com/BVisagie/network-sweeper).
 
-Include OS, version (`-no-browser` prints the URL; UI shows the version pill), and steps to reproduce.
+Include OS, version (`-version`, or the UI version pill), and steps to reproduce.
+
+## Linux installer (`scripts/install.sh`)
+
+The README one-liner downloads this script from GitHub and runs it. That is convenience, not a substitute for reading the script — prefer saving it and inspecting with `less` first.
+
+The script then fetches a **published release binary** (not `main` source) and verifies it against `SHA256SUMS` before running or installing. Interactive prompts read from `/dev/tty` so they work when the script is piped. The default action is ephemeral (temp directory). The dashboard still binds to `127.0.0.1` only.
+
+Do not `curl | sudo bash`. After a persistent install, elevate only the binary (`sudo network-sweeper`) for Deep discovery.
 
 ## Scope notes
 

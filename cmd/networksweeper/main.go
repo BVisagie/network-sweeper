@@ -16,9 +16,23 @@ import (
 	"github.com/BVisagie/network-sweeper/web"
 )
 
+// Palette matches web/style.css and scripts/install.sh.
+const (
+	ansiReset  = "\033[0m"
+	ansiAccent = "\033[38;2;62;207;142m"
+	ansiFg     = "\033[38;2;231;242;236m"
+	ansiMuted  = "\033[38;2;138;163;150m"
+)
+
 func main() {
 	noBrowser := flag.Bool("no-browser", false, "do not open the default browser")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(version.Display())
+		return
+	}
 
 	elevated := platform.IsElevated()
 	srv := api.New(web.FS, elevated)
@@ -30,10 +44,7 @@ func main() {
 	defer hs.Close()
 	defer ln.Close()
 
-	fmt.Printf("Network Sweeper %s\n", version.Display())
-	fmt.Printf("Dashboard: %s\n", srv.BaseURL)
-	fmt.Printf("OS: %s/%s  elevated: %v\n", runtime.GOOS, runtime.GOARCH, elevated)
-	fmt.Println("Listening on loopback only. Press Ctrl+C to stop.")
+	printStartup(srv.BaseURL, elevated)
 
 	if !*noBrowser {
 		openBrowser(srv.BaseURL)
@@ -42,9 +53,35 @@ func main() {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
 	<-ch
-	fmt.Println("\nShutting down…")
+	fmt.Println()
+	fmt.Println(paint(ansiMuted, "Shutting down…"))
 	_ = hs.Close()
 	time.Sleep(100 * time.Millisecond)
+}
+
+func printStartup(baseURL string, elevated bool) {
+	fmt.Printf("%s %s\n", paint(ansiAccent, "Network Sweeper"), paint(ansiFg, version.Display()))
+	fmt.Printf("%s %s\n", paint(ansiMuted, "Dashboard:"), paint(ansiAccent, baseURL))
+	fmt.Printf("%s %s/%s  elevated: %v\n", paint(ansiMuted, "OS:"), runtime.GOOS, runtime.GOARCH, elevated)
+	fmt.Println(paint(ansiMuted, "Listening on loopback only. Press Ctrl+C to stop."))
+}
+
+func shouldColor() bool {
+	if os.Getenv("NO_COLOR") != "" {
+		return false
+	}
+	fi, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
+}
+
+func paint(code, s string) string {
+	if !shouldColor() {
+		return s
+	}
+	return code + s + ansiReset
 }
 
 func openBrowser(url string) {
