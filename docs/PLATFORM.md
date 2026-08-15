@@ -42,6 +42,8 @@ Discovery ports (coverage-oriented) are separate from findings ports (risk/servi
 
 ## Elevation and Deep discovery
 
+How-tos: [windows.md](windows.md) · [macos.md](macos.md) · [linux.md](linux.md).
+
 - **Windows:** system `ping` is already tried as a best-effort discovery boost **even without Admin and even when Deep is unchecked**. For quieter devices, optionally right-click the `.exe` → **Run as administrator**. Active ARP is not available on Windows in this version.
 - **macOS:** `sudo ./network-sweeper-darwin-arm64` (or `darwin-amd64`), **then** enable Deep discovery beside **Scan my network** (ICMP + ARP).
 - **Linux:** `sudo ./network-sweeper-linux-amd64` (or `linux-arm64`), **then** enable Deep discovery (ICMP + ARP).
@@ -67,12 +69,13 @@ Consent is enforced server-side:
 
 ## Running on each OS
 
-End-user install and dependency details (including what is *not* required) live in the root [README.md](../README.md#client-requirements-end-users).
+End-user install, checksums, and elevation how-tos:
 
-Short version:
+- [linux.md](linux.md)
+- [windows.md](windows.md)
+- [macos.md](macos.md)
 
-- **Windows / Linux / macOS:** run the matching release binary; a browser is required; Go is not.
-- **Optional:** Administrator/`sudo` for Deep discovery on macOS/Linux (ICMP + ARP); system `ping` for ICMP (Windows often tries ping without elevation); unsigned-build allow steps below.
+Short version: run the matching release binary; a browser is required; Go is not. Optional Administrator/`sudo` for Deep discovery on macOS/Linux (ICMP + ARP); Windows often tries `ping` without elevation. Unsigned-build allow steps below.
 
 ## UI notes
 

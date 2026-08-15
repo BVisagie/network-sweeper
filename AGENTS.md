@@ -48,9 +48,10 @@ When capabilities change, update together:
 
 - `docs/PLATFORM.md`
 - `docs/ARCHITECTURE.md` (scan flow / package map)
-- `README.md` (features / troubleshooting / elevation)
+- `README.md` (short hub: what it is, install, links — no OS runbook copies)
+- `docs/linux.md` / `docs/windows.md` / `docs/macos.md` (install, troubleshooting, elevation)
 - Limitations UI copy / `internal/platform.Snapshot`
-- Elevation how-tos (Windows Run as administrator; macOS/Linux `sudo`)
+- Elevation how-tos (Windows Run as administrator; macOS/Linux `sudo` — in the OS runbooks + PLATFORM)
 - `CONTRIBUTING.md` discovery-honesty bullet if semantics change
 
 ## Scope and license

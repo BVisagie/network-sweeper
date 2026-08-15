@@ -6,7 +6,7 @@ By participating, you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Setup
 
-1. Install Go **1.26.5+** (and optional `make` / `git`) for your OS — see **Install Go (dev machines)** in [README.md](README.md#install-go-dev-machines) (Fedora/`dnf`, Debian/`apt`, macOS/`brew`, Windows/`winget`).
+1. Install Go **1.26.5+** (and optional `make` / `git`) for your OS — see the **Developers** section in [docs/linux.md](docs/linux.md), [docs/windows.md](docs/windows.md), or [docs/macos.md](docs/macos.md).
 2. Confirm: `go version`
 3. Clone and verify:
 
@@ -25,7 +25,7 @@ No Node install is required. End-user release binaries do not need Go at all.
 - UI is vanilla HTML/CSS/JS under `web/` — no Node toolchain.
 - **Security invariants:** bind `127.0.0.1` only; keep session token + Origin checks; default targets = local CIDRs; custom ranges need explicit opt-in.
 - Discovery honesty: Deep = ICMP, plus active ARP on elevated Linux/macOS (Windows ARP stays deferred). ARP cache enrichment runs on all OSes. Never mark unimplemented capabilities as `full` when elevated.
-- When capabilities change, update together: `docs/PLATFORM.md`, `docs/ARCHITECTURE.md`, README, Limitations UI / `internal/platform.Snapshot`, and elevation how-tos.
+- When capabilities change, update together: `docs/PLATFORM.md`, `docs/ARCHITECTURE.md`, the README hub, OS runbooks (`docs/linux.md` / `windows.md` / `macos.md`), Limitations UI / `internal/platform.Snapshot`, and elevation how-tos.
 - Keep diffs focused; match existing style.
 - License: GNU GPL v3 (`LICENSE`); copyright in `NOTICE`.
 
