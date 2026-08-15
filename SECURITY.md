@@ -14,7 +14,7 @@ The README one-liner downloads this script from GitHub and runs it. That is conv
 
 The script then fetches a **published release binary** (not `main` source) and verifies it against `SHA256SUMS` before running or installing. Interactive prompts read from `/dev/tty` so they work when the script is piped. The default action is ephemeral (temp directory). The dashboard still binds to `127.0.0.1` only.
 
-Do not `curl | sudo bash`. After a persistent install, elevate only the binary (`sudo network-sweeper`) for Deep discovery.
+Do not `curl | sudo bash` (runs the installer as root). `sudo curl | bash` only elevates curl, not the app. After checksum verification, elevate only the binary: launcher `--sudo` / menu “Run once with sudo”, or `sudo network-sweeper` after a persistent install.
 
 ## Scope notes
 
