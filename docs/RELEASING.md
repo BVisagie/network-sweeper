@@ -9,11 +9,12 @@
 ## Cut a release
 
 1. Ensure `main` (or the release branch) is green: `make test` locally and CI on the PR.
+   Optionally refresh the MAC vendor registry first: `make oui`, then commit `internal/oui/ieee.csv`.
 2. Tag a semver release (leading `v` required for the workflow):
 
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.4.0
+git push origin v0.4.0
 ```
 
 3. GitHub Actions runs `make cross`, uploads binaries + `SHA256SUMS` to the GitHub Release.
@@ -49,4 +50,4 @@ Keep those asset names stable. Until a non-draft release exists, the launcher fa
 
 ## Signing
 
-Code signing / notarization is deferred. Document “allow anyway” steps in [linux.md](linux.md), [windows.md](windows.md), [macos.md](macos.md), and [PLATFORM.md](PLATFORM.md). Checksums are the trust bridge for v1 testers.
+Code signing / notarization is deferred. Document “allow anyway” steps in [windows.md](windows.md), [macos.md](macos.md), and [PLATFORM.md](PLATFORM.md). Checksums are the trust bridge for v1 testers.

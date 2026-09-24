@@ -29,8 +29,8 @@ const (
 
 const ifnamsiz = 16
 
-func sweepARP(ctx context.Context, targets []*net.IPNet, timeout time.Duration) map[string]string {
-	out := map[string]string{}
+func sweepARP(ctx context.Context, targets []*net.IPNet, timeout time.Duration) map[string][]string {
+	out := map[string][]string{}
 	ifaces, err := net.Interfaces()
 	if err != nil {
 		return out
@@ -70,16 +70,18 @@ func sweepARP(ctx context.Context, targets []*net.IPNet, timeout time.Duration) 
 			if len(probe) == 0 {
 				continue
 			}
-			for ip, mac := range arpSweepIfaceDarwin(ctx, iface, localIP, probe, timeout) {
-				out[ip] = mac
+			for ip, macs := range arpSweepIfaceDarwin(ctx, iface, localIP, probe, timeout) {
+				for _, mac := range macs {
+					addReply(out, ip, mac)
+				}
 			}
 		}
 	}
 	return out
 }
 
-func arpSweepIfaceDarwin(ctx context.Context, iface net.Interface, srcIP net.IP, dsts []net.IP, timeout time.Duration) map[string]string {
-	out := map[string]string{}
+func arpSweepIfaceDarwin(ctx context.Context, iface net.Interface, srcIP net.IP, dsts []net.IP, timeout time.Duration) map[string][]string {
+	out := map[string][]string{}
 	f, err := openBPF()
 	if err != nil {
 		return out
@@ -108,30 +110,36 @@ func arpSweepIfaceDarwin(ctx context.Context, iface net.Interface, srcIP net.IP,
 	if dl, ok := ctx.Deadline(); ok && dl.Before(deadline) {
 		deadline = dl
 	}
-	buf := make([]byte, 4096)
-	for len(want) > 0 && time.Now().Before(deadline) {
+	buf := make([]byte, bpfBufLen(fd)) // BPF reads must use the device's buffer size
+	// Listen until the deadline, not just until every target answered once:
+	// a second device answering for the same IP is how a duplicate shows up.
+	for time.Now().Before(deadline) {
 		if ctx.Err() != nil {
 			break
 		}
 		_ = f.SetReadDeadline(deadline)
 		n, err := f.Read(buf)
-		if err != nil || n < 18 {
+		if err != nil || n < bpfHdrMin {
 			continue
 		}
-		// BPF record header: bh_tstamp(8/16), bh_caplen(4), bh_datalen(4), bh_hdrlen(2) — varies by arch.
-		// Parse conservatively: scan for ARP ethertype in buffer.
-		for off := 0; off+42 <= n; off++ {
-			if off+14 <= n && binary.BigEndian.Uint16(buf[off+12:off+14]) == 0x0806 {
-				ip, mac, ok := parseARPReplyAnyDarwin(buf[off:n])
-				if ok && want[ip] {
-					out[ip] = mac
-					delete(want, ip)
-				}
-				break
+		eachBPFRecord(buf[:n], func(frame []byte) {
+			ip, mac, ok := parseARPReplyAnyDarwin(frame)
+			if ok && want[ip] {
+				addReply(out, ip, mac)
 			}
-		}
+		})
 	}
 	return out
+}
+
+// bpfBufLen returns the BPF device's buffer length (BIOCGBLEN), or 4096.
+func bpfBufLen(fd int) int {
+	var n int32
+	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), uintptr(biocgblen), uintptr(unsafe.Pointer(&n)))
+	if errno != 0 || n <= 0 {
+		return 4096
+	}
+	return int(n)
 }
 
 func openBPF() (*os.File, error) {
@@ -201,7 +209,4 @@ func parseARPReplyAnyDarwin(frame []byte) (ip, mac string, ok bool) {
 	return net.IP(frame[28:32]).String(), net.HardwareAddr(frame[22:28]).String(), true
 }
 
-var (
-	_ = biocgblen
-	_ = biocsblen
-)
+var _ = biocsblen

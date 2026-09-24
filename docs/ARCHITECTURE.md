@@ -7,14 +7,16 @@ Network Sweeper is a stdlib-only Go program: one binary embeds a localhost web U
 ```
 cmd/networksweeper     CLI entry: flags, start API, open browser, signal shutdown
 scripts/install.sh     Linux curl|bash launcher + launch menu (not a scan UI)
-internal/api           Localhost HTTP, token/Origin hardening, scan orchestration, export
+internal/api           Localhost HTTP, token/Origin hardening, scan orchestration, JSON/CSV export
+                       (CSV cells from device text are neutralised against formulas)
 internal/discover      TCP discovery, optional ICMP/ARP, ARP cache MAC, reverse DNS,
                        NetBIOS/mDNS hostname fill, SSDP + SNMP soft probes
 internal/scan          Findings-port TCP connect scan + service labels
 internal/enrich        Short HTTP title/Server, TLS cert summary, SSH/FTP/SMTP banners
 internal/risk          Heuristic findings from open ports / enrichment / host metadata
 internal/netinfo       Interfaces, CIDR helpers, allowlist, default gateway (best-effort)
-internal/oui           Offline MAC vendor prefix map
+internal/oui           Offline MAC vendor lookup: curated map, then embedded IEEE MA-L registry
+                       (ieee.csv, refreshed by `make oui` / internal/oui/gen)
 internal/platform      Elevation detection + capability snapshot for Limitations UI
 internal/update        Opt-in GitHub Releases check
 internal/version       Link-time version + public repo path for updates
@@ -25,7 +27,7 @@ web/                   Embedded UI (index.html, style.css, app.js) via embed.FS
 
 1. `POST /api/scan` validates targets against local subnets (or custom opt-in).
 2. `discover.Engine.Discover` probes discovery ports; ICMP via system `ping` when Windows boost applies or Deep+elevated on Unix; active ARP who-has when Deep+elevated on Linux/macOS.
-3. MAC from ARP cache (and ARP replies) + OUI; hosts tagged as self / gateway (or soft router guess) when known.
+3. On-link hosts in the OS ARP cache (resolved during the TCP dials) that no probe found are added as `arp-cache` (static/permanent rows excluded); MAC from ARP cache (and ARP replies) + OUI; reverse DNS runs concurrently; hosts tagged as self / gateway (or soft router guess), private MAC (U/L bit, no vendor) and duplicate IP (several ARP replies) when known.
 4. `scan.ScanHosts` probes findings ports on live hosts.
 5. `enrich.Results` adds lightweight HTTP/TLS/banner hints on relevant open ports.
 6. `discover.EnrichHostnames` fills empty names via NetBIOS then mDNS.
@@ -50,4 +52,4 @@ Overview host rows use shared float tips (`data-tip`) for beginner-friendly help
 
 ## Deep discovery honesty
 
-**Deep discovery** means **ICMP via system `ping`**, and on **elevated Linux/macOS** also an **active ARP sweep**. On Windows, ICMP is attempted as a best-effort boost even without elevation (and even when Deep is unchecked); active ARP remains deferred. ARP **cache** enrichment still runs after contact on all OSes.
+**Deep discovery** means **ICMP via system `ping`**, and on **elevated Linux/macOS** also an **active ARP sweep**. On Windows, ICMP is attempted as a best-effort boost even without elevation (and even when Deep is unchecked); active ARP remains deferred. ARP **cache** enrichment and `arp-cache` host discovery still run after contact on all OSes, unprivileged.

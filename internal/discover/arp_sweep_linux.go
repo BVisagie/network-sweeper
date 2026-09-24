@@ -16,8 +16,8 @@ func arpSweepSupported() bool { return true }
 
 func htons(v uint16) uint16 { return (v << 8) | (v >> 8) }
 
-func sweepARP(ctx context.Context, targets []*net.IPNet, timeout time.Duration) map[string]string {
-	out := map[string]string{}
+func sweepARP(ctx context.Context, targets []*net.IPNet, timeout time.Duration) map[string][]string {
+	out := map[string][]string{}
 	ifaces, err := net.Interfaces()
 	if err != nil {
 		return out
@@ -57,16 +57,18 @@ func sweepARP(ctx context.Context, targets []*net.IPNet, timeout time.Duration) 
 			if len(probe) == 0 {
 				continue
 			}
-			for ip, mac := range arpSweepIfaceLinux(ctx, iface, localIP, probe, timeout) {
-				out[ip] = mac
+			for ip, macs := range arpSweepIfaceLinux(ctx, iface, localIP, probe, timeout) {
+				for _, mac := range macs {
+					addReply(out, ip, mac)
+				}
 			}
 		}
 	}
 	return out
 }
 
-func arpSweepIfaceLinux(ctx context.Context, iface net.Interface, srcIP net.IP, dsts []net.IP, timeout time.Duration) map[string]string {
-	out := map[string]string{}
+func arpSweepIfaceLinux(ctx context.Context, iface net.Interface, srcIP net.IP, dsts []net.IP, timeout time.Duration) map[string][]string {
+	out := map[string][]string{}
 	fd, err := syscall.Socket(syscall.AF_PACKET, syscall.SOCK_RAW, int(htons(syscall.ETH_P_ARP)))
 	if err != nil {
 		return out
@@ -96,7 +98,9 @@ func arpSweepIfaceLinux(ctx context.Context, iface net.Interface, srcIP net.IP, 
 		deadline = dl
 	}
 	buf := make([]byte, 128)
-	for len(want) > 0 && time.Now().Before(deadline) {
+	// Listen until the deadline, not just until every target answered once:
+	// a second device answering for the same IP is how a duplicate shows up.
+	for time.Now().Before(deadline) {
 		if ctx.Err() != nil {
 			break
 		}
@@ -111,8 +115,7 @@ func arpSweepIfaceLinux(ctx context.Context, iface net.Interface, srcIP net.IP, 
 		if !ok || !want[ip] {
 			continue
 		}
-		out[ip] = mac
-		delete(want, ip)
+		addReply(out, ip, mac)
 	}
 	return out
 }

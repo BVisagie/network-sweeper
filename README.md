@@ -26,7 +26,7 @@ A browser opens the dashboard (`-no-browser` prints the URL; `-version` prints t
 |---|---|
 | Run | [Linux](docs/linux.md) · [Windows](docs/windows.md) · [macOS](docs/macos.md) |
 | Product | [Platform capabilities](docs/PLATFORM.md) · [Architecture](docs/ARCHITECTURE.md) |
-| Project | [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Releasing](docs/RELEASING.md) · [Code of Conduct](CODE_OF_CONDUCT.md) |
+| Project | [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Releasing](docs/RELEASING.md) |
 
 ## License
 

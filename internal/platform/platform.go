@@ -30,7 +30,7 @@ func Snapshot(elevated bool) Info {
 		Arch:     runtime.GOARCH,
 		Elevated: elevated,
 		Notes: []string{
-			"In unprivileged mode, a host that does not accept connections on any discovery port (and is not found via ICMP/ARP when Deep discovery is available) will not appear at all — not merely with missing MAC/vendor.",
+			"A host that closes every discovery port can still appear via the OS ARP cache (arp-cache) when it is on your local segment. Hosts off the segment, behind client isolation, or ignoring ARP (and not found via ICMP/ARP when Deep discovery is available) will not appear at all.",
 			"Deep discovery adds ICMP (system ping) and, on Linux/macOS when elevated, an active ARP sweep. On Windows, ping may already run as a boost without Deep/Admin; active ARP remains deferred.",
 			"Code signing / notarization is deferred for v1; SmartScreen (Windows) and Gatekeeper (macOS) may warn on unsigned binaries.",
 			"Wi‑Fi client isolation and other VLANs/guest networks hide peers at the network layer — the app cannot see them.",
@@ -42,6 +42,7 @@ func Snapshot(elevated bool) Info {
 		{Name: "TCP connect discovery", Status: "full", Detail: "Primary portable unprivileged discovery path."},
 		{Name: "TCP findings port scan", Status: "full", Detail: "Common services labeled for overview and risk heuristics."},
 		{Name: "ARP cache MAC enrichment", Status: "full", Detail: "MAC appears after the OS has an ARP entry for the host."},
+		{Name: "ARP cache host discovery", Status: "full", Detail: "On-link hosts the OS resolved during TCP discovery are listed as arp-cache even with every port closed. No elevation needed; a device that just left may linger briefly."},
 		arpSweepCap(elevated),
 		icmpCap(elevated),
 		{Name: "Hostname resolution", Status: "partial", Detail: "Reverse DNS, then NetBIOS (UDP/137), then mDNS reverse PTR; SSDP/SNMP may fill remaining empty names. Not exhaustive on all IoT."},
@@ -67,10 +68,10 @@ func arpSweepCap(elevated bool) Capability {
 		}
 	}
 	st := "elevated"
-	detail := "Deep discovery + elevation sends ARP who-has on local interfaces to find quiet hosts."
+	detail := "Deep discovery + elevation sends ARP who-has on local interfaces to find quiet hosts and flag duplicate IPs."
 	if elevated {
 		st = "full"
-		detail = "Available with current elevation: ARP who-has during Deep discovery."
+		detail = "Available with current elevation: ARP who-has during Deep discovery (also flags duplicate IPs)."
 	}
 	return Capability{Name: "Active ARP sweep", Status: st, Detail: detail}
 }

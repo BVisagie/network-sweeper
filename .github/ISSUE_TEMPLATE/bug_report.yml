@@ -19,7 +19,7 @@ body:
     id: version
     attributes:
       label: Version
-      description: Version pill in the UI, or the string printed at startup (e.g. v0.2.0).
+      description: Version pill in the UI, or the string printed at startup (e.g. v0.3.0).
       placeholder: v0.x.y
     validations:
       required: true

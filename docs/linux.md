@@ -12,7 +12,7 @@ For a **prebuilt release binary** you do **not** need Go, Node, Docker, nmap, or
 | Web browser | Yes | Opened automatically when a display is available |
 | `curl` + `sha256sum` | For the one-liner | GNU coreutils `sha256sum` |
 | `ping` | Recommended | Used for Deep discovery (ICMP) when elevated |
-| `arp` | Optional | Not required; the app prefers `/proc/net/arp` |
+| `arp` | Optional | Not required; the app reads `/proc/net/arp` for MAC addresses and quiet on-link hosts (`arp-cache`) |
 | root (`sudo`) | Optional | Needed for **Deep discovery** (ICMP ping + active ARP). Normal TCP scans work without elevation |
 
 ## Quick start
@@ -55,7 +55,7 @@ curl -fsSL https://raw.githubusercontent.com/BVisagie/network-sweeper/main/scrip
 curl -fsSL https://raw.githubusercontent.com/BVisagie/network-sweeper/main/scripts/install.sh | bash -s -- --install-only --prefix "$HOME/.local/bin"
 ```
 
-On SSH/headless sessions with no display, the launcher passes `-no-browser` and prints the dashboard URL. The installer downloads a **published release** (not `main` source) and will fail with a plain-language message until a Release exists. See [SECURITY.md](../SECURITY.md).
+On SSH/headless sessions with no display, the launcher passes `-no-browser` and prints the dashboard URL. The installer downloads the latest **published release** (not `main` source); if GitHub is unreachable it stops with a plain-language message. See [SECURITY.md](../SECURITY.md).
 
 ## Manual download
 
@@ -108,16 +108,25 @@ TCP discovery and findings scans work without elevation. Full matrix: [PLATFORM.
 | Deep discovery seems ignored | Needs `sudo` **and** the Deep checkbox (then ICMP + ARP). Check the Elevated badge and Limitations tab |
 | Missing names / “Unknown” | Names fill from reverse DNS, NetBIOS, mDNS, then SSDP/SNMP hints — many IoT devices still advertise little |
 | No MAC yet | ARP cache not populated yet, or Wi‑Fi client isolation / VPN path hides L2 |
+| Found via `arp-cache`, no open ports | The device answered your computer's ARP lookup but closed every discovery port. It is on your network; a device that just left can linger for a minute |
+| No vendor, **Private MAC** badge | The device uses a randomised (locally administered) MAC, as phones do on Wi‑Fi. No maker can be looked up for it |
 | Update check fails | Enable opt-in in Settings; needs public GitHub Releases; offline networks cannot check |
 
 ## Developers
 
-Go **1.26.5+** (see `go.mod`). Confirm with `go version`. If your distro’s package is older, use the [official Go install](https://go.dev/dl/).
+Go **1.27.1+** (see `go.mod`). Confirm with `go version`. If your distro’s package is older, use the [official Go install](https://go.dev/dl/).
 
 **Fedora / RHEL-family**
 
 ```bash
 sudo dnf install -y golang make git
+go version
+```
+
+**Arch / Omarchy**
+
+```bash
+sudo pacman -S --needed go make git
 go version
 ```
 

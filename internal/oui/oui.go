@@ -1,9 +1,50 @@
 package oui
 
-import "strings"
+import (
+	"bufio"
+	"bytes"
+	_ "embed"
+	"fmt"
+	"strings"
+	"sync"
+)
 
-// Compact built-in OUI prefix map (normalized uppercase, no separators).
-// Not exhaustive — enough for common vendors in a home/lab LAN.
+//go:generate go run ./gen -out ieee.csv
+
+// ieeeCSV is the IEEE MA-L registry trimmed to "PREFIX,Organization" rows
+// after one "# ..." line naming the source and fetch date (make oui).
+//
+//go:embed ieee.csv
+var ieeeCSV []byte
+
+var (
+	ieeeOnce sync.Once
+	ieee     map[string]string
+)
+
+// ieeeTable parses the embedded registry on first use.
+func ieeeTable() map[string]string {
+	ieeeOnce.Do(func() {
+		ieee = make(map[string]string, 41000)
+		sc := bufio.NewScanner(bytes.NewReader(ieeeCSV))
+		for sc.Scan() {
+			line := strings.TrimRight(sc.Text(), "\r") // CRLF on Windows checkouts
+			if len(line) < 8 || line[0] == '#' || line[6] != ',' {
+				continue
+			}
+			org := line[7:]
+			if len(org) >= 2 && org[0] == '"' && org[len(org)-1] == '"' {
+				org = strings.ReplaceAll(org[1:len(org)-1], `""`, `"`)
+			}
+			ieee[line[:6]] = org
+		}
+	})
+	return ieee
+}
+
+// Curated OUI prefix map (normalized uppercase, no separators). Checked before
+// the full IEEE registry: friendlier names, plus virtual NIC prefixes the
+// registry does not list.
 var prefixes = map[string]string{
 	// Hypervisors / virtual NICs
 	"000C29": "VMware",
@@ -232,7 +273,22 @@ func Lookup(mac string) string {
 	if v, ok := prefixes[n[:6]]; ok {
 		return v
 	}
-	return ""
+	return ieeeTable()[n[:6]]
+}
+
+// LocallyAdministered reports whether the MAC has the U/L bit (0x02 of the
+// first octet) set: software assigned it, so no IEEE vendor owns it. Phones'
+// private Wi-Fi addresses, VMs and containers use these.
+func LocallyAdministered(mac string) bool {
+	n := normalize(mac)
+	if len(n) < 2 {
+		return false
+	}
+	var first byte
+	if _, err := fmt.Sscanf(n[:2], "%02X", &first); err != nil {
+		return false
+	}
+	return first&0x02 != 0
 }
 
 func normalize(mac string) string {
