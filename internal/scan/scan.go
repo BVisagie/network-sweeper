@@ -59,6 +59,13 @@ type OpenPort struct {
 	Port    int    `json:"port"`
 	Service string `json:"service"`
 
+	// Protocol names the protocol a probe response confirmed (HTTP, TLS, SSH,
+	// FTP, SMTP, Telnet, Docker API). Empty means only the port label is known.
+	Protocol string `json:"protocol,omitempty"`
+	// Probe is "answered" or "no-answer" when a protocol probe ran for this
+	// port, and empty when none applies. "no-answer" is not a negative result.
+	Probe string `json:"probe,omitempty"`
+
 	// Optional post-connect enrichment (stdlib probes; educational only).
 	Banner        string    `json:"banner,omitempty"`
 	HTTPTitle     string    `json:"httpTitle,omitempty"`
