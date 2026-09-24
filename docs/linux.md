@@ -84,7 +84,7 @@ The one-liner verifies the matching Linux asset before run or install. On mismat
 
 ## Elevation and Deep discovery
 
-Deep discovery on Linux is **ICMP via system `ping` plus an active ARP sweep**. It needs **both** `sudo` **and** the Deep checkbox on Overview (not inside Advanced options).
+Deep discovery on Linux is **ICMP via system `ping` plus an active ARP sweep**. It needs **both** `sudo` **and** the Deep checkbox beside **Scan** on the Devices tab.
 
 From the one-liner, choose **Run once with sudo** or pass `--sudo` (the launcher runs the checksum-verified binary with sudo, not the script). You can also:
 
@@ -96,6 +96,10 @@ sudo network-sweeper
 
 TCP discovery and findings scans work without elevation. Full matrix: [PLATFORM.md](PLATFORM.md).
 
+## Saved history
+
+Scan history, device names, notes, tags, and finding reviews are saved in `~/.local/share/network-sweeper` (or `$XDG_DATA_HOME/network-sweeper`. Pass `--data-dir DIR` to use another folder, or `--ephemeral` to keep nothing after exit. Elevated runs (`sudo`) keep history in memory only, so root never writes into your inventory; add `--data-dir` if you want an elevated run to save. The one-liner's default run-once mode passes `--ephemeral`; an installed copy saves. Settings → **History and saved data** shows where data lives, sets how many scans to keep (100 by default), and deletes history.
+
 ## Troubleshooting
 
 | Problem | What to try |
@@ -105,7 +109,7 @@ TCP discovery and findings scans work without elevation. Full matrix: [PLATFORM.
 | `sudo curl … \| bash` still shows not elevated | `sudo` only applies to `curl`. Choose **Run once with sudo**, pass `--sudo`, or install then `sudo network-sweeper`. If you just used `sudo curl`, the launcher offers to elevate when credentials are still cached |
 | Checksum mismatch | The launcher refuses to run. Re-download, or install a verified asset from Releases by hand |
 | Zero hosts | Guest Wi‑Fi or AP isolation; try Deep discovery with `sudo` and the Deep checkbox; confirm subnet |
-| Deep discovery seems ignored | Needs `sudo` **and** the Deep checkbox (then ICMP + ARP). Check the Elevated badge and Limitations tab |
+| Deep discovery seems ignored | Needs `sudo` **and** the Deep checkbox (then ICMP + ARP). Check the Elevated badge and Settings → Platform capabilities |
 | Missing names / “Unknown” | Names fill from reverse DNS, NetBIOS, mDNS, then SSDP/SNMP hints — many IoT devices still advertise little |
 | No MAC yet | ARP cache not populated yet, or Wi‑Fi client isolation / VPN path hides L2 |
 | Found via `arp-cache`, no open ports | The device answered your computer's ARP lookup but closed every discovery port. It is on your network; a device that just left can linger for a minute |

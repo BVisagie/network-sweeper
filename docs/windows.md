@@ -53,6 +53,10 @@ On Windows, system `ping` is already tried as a best-effort discovery boost **ev
 
 TCP discovery and findings scans work without elevation. Full matrix: [PLATFORM.md](PLATFORM.md).
 
+## Saved history
+
+Scan history, device names, notes, tags, and finding reviews are saved in `%LocalAppData%\network-sweeper`. Pass `--data-dir DIR` to use another folder, or `--ephemeral` to keep nothing after exit. Run as administrator uses the same folder. Settings → **History and saved data** shows where data lives, sets how many scans to keep (100 by default), and deletes history.
+
 ## Troubleshooting
 
 | Problem | What to try |
@@ -60,7 +64,7 @@ TCP discovery and findings scans work without elevation. Full matrix: [PLATFORM.
 | Browser didn’t open | Run with `-no-browser` and open the printed `http://127.0.0.1:…` URL |
 | SmartScreen | Verify checksums; **More info → Run anyway** only if you trust the build |
 | Zero hosts | Guest Wi‑Fi or AP isolation; try Run as administrator; confirm subnet |
-| Deep discovery seems ignored | Ping may already run without Admin; active ARP is deferred — check the Elevated badge and Limitations tab |
+| Deep discovery seems ignored | Ping may already run without Admin; active ARP is deferred — check the Elevated badge and Settings → Platform capabilities |
 | Missing names / “Unknown” | Names fill from reverse DNS, NetBIOS, mDNS, then SSDP/SNMP hints — many IoT devices still advertise little |
 | No MAC yet | ARP cache not populated yet, or Wi‑Fi client isolation / VPN path hides L2 |
 | Found via `arp-cache`, no open ports | The device answered your computer's ARP lookup but closed every discovery port. It is on your network; a device that just left can linger for a minute |

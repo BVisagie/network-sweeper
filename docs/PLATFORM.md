@@ -17,6 +17,8 @@ Legend: **Available** = works with current privileges · **Needs elevation** = f
 - Hostname resolution: reverse DNS, then NetBIOS (UDP/137), then mDNS reverse PTR; SSDP/SNMP may fill remaining empty names
 - Service enrichment on open findings ports: HTTP title/`Server`, TLS cert summary (CN/issuer/expiry/self-signed), SSH/FTP/SMTP banners
 - SSDP/UPnP inventory hints (known hosts only) + SNMP soft `public` probe (educational findings)
+- Saved history: scans, device names/notes/tags, and finding reviews in a per-user data folder (see below), with comparisons between scans of the same network
+- Target preview: ranges are deduplicated and sized before a scan; selections over 1,024 addresses are refused rather than cut short
 - Hardened local API (ephemeral port, per-launch token, Origin checks)
 - Server-side default restriction to detected local subnets
 
@@ -47,10 +49,22 @@ Discovery ports (coverage-oriented) are separate from findings ports (risk/servi
 How-tos: [windows.md](windows.md) · [macos.md](macos.md) · [linux.md](linux.md).
 
 - **Windows:** system `ping` is already tried as a best-effort discovery boost **even without Admin and even when Deep is unchecked**. For quieter devices, optionally right-click the `.exe` → **Run as administrator**. Active ARP is not available on Windows in this version.
-- **macOS:** `sudo ./network-sweeper-darwin-arm64` (or `darwin-amd64`), **then** enable Deep discovery beside **Scan my network** (ICMP + ARP).
+- **macOS:** `sudo ./network-sweeper-darwin-arm64` (or `darwin-amd64`), **then** enable Deep discovery beside **Scan** (ICMP + ARP).
 - **Linux:** `sudo ./network-sweeper-linux-amd64` (or `linux-arm64`), **then** enable Deep discovery (ICMP + ARP).
 
-On Linux/macOS, Deep discovery needs both elevation and the checkbox. Deep is on the Overview scan row (not inside Advanced options). Advanced options cover custom CIDR and export.
+On Linux/macOS, Deep discovery needs both elevation and the checkbox, which sits beside **Scan** on the Devices tab. Elevated Linux/macOS runs do not save history unless `--data-dir` is given (see below).
+
+## Saved history and data location
+
+| OS | Default folder |
+|---|---|
+| Linux / other Unix | `$XDG_DATA_HOME/network-sweeper`, else `~/.local/share/network-sweeper` |
+| macOS | `~/Library/Application Support/network-sweeper` |
+| Windows | `%LocalAppData%\network-sweeper` |
+
+`--data-dir DIR` overrides the folder; `--ephemeral` keeps everything in memory for the session. Elevated runs on Linux/macOS default to memory only so root never creates files in the user's inventory (pass `--data-dir` to save anyway); on Windows an elevated process keeps the same folder. Files are private (0600/0700) where the OS supports it, and a lock file keeps a second instance from writing to the same folder. A damaged index, or one written by a newer version, is left untouched and the session runs in memory with the reason shown in the UI.
+
+Devices are tracked per network, where a network is the gateway's MAC plus its subnet, so two networks that both use `192.168.1.0/24` stay apart. Devices match on MAC; devices without a usable MAC are tracked by IP and marked as uncertain. Comparisons report absence as "not observed" and a closed service only when its port refused the connection.
 
 ## Local API security
 
@@ -81,7 +95,7 @@ Short version: run the matching release binary; a browser is required; Go is not
 
 ## UI notes
 
-The Overview host table includes hover tips for Found via (`tcp/N`, `icmp`, `arp`, `arp-cache`), open ports, names/vendor, MAC, and device badges. Prefer keeping that copy educational and short when changing discovery semantics.
+The Devices table has hover tips on open ports, and the device detail explains how each device was found (`tcp/N`, `icmp`, `arp`, `arp-cache`). Prefer keeping that copy educational and short when changing discovery semantics.
 
 ## Code signing (v1 decision)
 

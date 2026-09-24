@@ -32,7 +32,12 @@ func (s *Store) profileFor(snap *Snapshot) *Profile {
 	}
 	p.Name = defaultProfileName(p)
 	if snap.GatewayIP != "" && mac != "" {
-		p.Name = fmt.Sprintf("%s (gateway %s)", subnet, snap.GatewayIP)
+		// The MAC tail tells apart networks that share a subnet and gateway IP.
+		tail := mac
+		if len(mac) > 8 {
+			tail = "…" + mac[len(mac)-8:]
+		}
+		p.Name = fmt.Sprintf("%s (gateway %s, %s)", subnet, snap.GatewayIP, tail)
 	}
 	s.inv.Profiles = append(s.inv.Profiles, p)
 	return p

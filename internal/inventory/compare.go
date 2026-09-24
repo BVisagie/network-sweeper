@@ -14,12 +14,13 @@ import (
 
 // ScanRef describes one side of a comparison.
 type ScanRef struct {
-	ID        string    `json:"id"`
-	StartedAt time.Time `json:"startedAt"`
-	State     string    `json:"state"`
-	Partial   bool      `json:"partial"`
-	Ranges    []string  `json:"ranges"`
-	Methods   []string  `json:"methods"`
+	ID         string    `json:"id"`
+	StartedAt  time.Time `json:"startedAt"`
+	FinishedAt time.Time `json:"finishedAt"`
+	State      string    `json:"state"`
+	Partial    bool      `json:"partial"`
+	Ranges     []string  `json:"ranges"`
+	Methods    []string  `json:"methods"`
 }
 
 // DeviceRef names a device in a change.
@@ -103,7 +104,7 @@ func indexSnapshot(snap *Snapshot) map[string]*deviceView {
 
 func ref(snap *Snapshot) ScanRef {
 	return ScanRef{
-		ID: snap.ID, StartedAt: snap.StartedAt, State: snap.State, Partial: snap.Partial,
+		ID: snap.ID, StartedAt: snap.StartedAt, FinishedAt: snap.FinishedAt, State: snap.State, Partial: snap.Partial,
 		Ranges: snap.Coverage.Ranges, Methods: snap.Coverage.Methods,
 	}
 }

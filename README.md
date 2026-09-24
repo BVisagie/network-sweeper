@@ -1,6 +1,6 @@
 # Network Sweeper
 
-Local LAN inventory in one Go binary: discover devices on networks attached to your machine, list common open services, and read heuristic exposure tips. Not a remote pentest suite or exploit framework.
+Local LAN inventory in one Go binary: discover devices on networks attached to your machine, keep names and notes for them, see what changed since the last scan, and review exposure findings that say what evidence backs them. Not a remote pentest suite or exploit framework.
 
 **Only scan networks you own or are authorized to assess.** The UI binds to `127.0.0.1` only.
 
@@ -18,7 +18,7 @@ Do not pipe that through `sudo` (`sudo curl | bash` only elevates curl; `curl | 
 
 Windows and macOS: download the matching asset from [Releases](https://github.com/BVisagie/network-sweeper/releases) and follow [docs/windows.md](docs/windows.md) or [docs/macos.md](docs/macos.md). No Go, Node, or nmap required to run a prebuilt binary.
 
-A browser opens the dashboard (`-no-browser` prints the URL; `-version` prints the version).
+A browser opens the dashboard (`-no-browser` prints the URL; `-version` prints the version). History is saved per user; `-ephemeral` keeps nothing, `-data-dir DIR` picks the folder ([details](docs/PLATFORM.md#saved-history-and-data-location)).
 
 ## Docs
 

@@ -28,6 +28,9 @@ type deviceView struct {
 	SeenInLatest bool `json:"seenInLatest"`
 	// New is true when the newest scan is the first to observe it.
 	New bool `json:"new"`
+	// InLatestScope is true when the newest scan's ranges covered the device's
+	// last address, so its absence from that scan means something.
+	InLatestScope bool `json:"inLatestScope"`
 }
 
 func (s *Server) view(d inventory.Device, latest *inventory.ScanEntry, detail bool) deviceView {
@@ -35,6 +38,13 @@ func (s *Server) view(d inventory.Device, latest *inventory.ScanEntry, detail bo
 	if latest != nil {
 		v.SeenInLatest = d.LastScanID == latest.ID
 		v.New = v.SeenInLatest && d.FirstSeen.Equal(latest.FinishedAt)
+		ip := net.ParseIP(lastIP(d))
+		for _, r := range latest.Ranges {
+			if _, n, err := net.ParseCIDR(r); err == nil && ip != nil && n.Contains(ip) {
+				v.InLatestScope = true
+				break
+			}
+		}
 	}
 	if d.Last != nil {
 		for _, f := range d.Last.Findings {

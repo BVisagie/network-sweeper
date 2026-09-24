@@ -7,17 +7,20 @@ Network Sweeper is a stdlib-only Go program: one binary embeds a localhost web U
 ```
 cmd/networksweeper     CLI entry: flags, start API, open browser, signal shutdown
 scripts/install.sh     Linux curl|bash launcher + launch menu (not a scan UI)
-internal/api           Localhost HTTP, token/Origin hardening, scan orchestration, JSON/CSV export
-                       (CSV cells from device text are neutralised against formulas)
+internal/api           Localhost HTTP, token/Origin hardening, scan planning and lifecycle,
+                       inventory endpoints, JSON/CSV export (CSV cells from device text are
+                       neutralised against formulas)
 internal/discover      TCP discovery, optional ICMP/ARP, ARP cache MAC, reverse DNS,
                        NetBIOS/mDNS hostname fill, SSDP + SNMP soft probes
 internal/scan          Findings-port TCP connect scan + service labels
 internal/enrich        Short HTTP title/Server, TLS cert summary, SSH/FTP/SMTP banners
-internal/risk          Heuristic findings from open ports / enrichment / host metadata
+internal/risk          Findings with category, confidence, and evidence from ports / probes / host metadata
+internal/inventory     Saved history: snapshots, network profiles, device identity, annotations,
+                       finding reviews, comparisons (stdlib JSON, atomic writes, PID lockfile)
 internal/netinfo       Interfaces, CIDR helpers, allowlist, default gateway (best-effort)
 internal/oui           Offline MAC vendor lookup: curated map, then embedded IEEE MA-L registry
                        (ieee.csv, refreshed by `make oui` / internal/oui/gen)
-internal/platform      Elevation detection + capability snapshot for Limitations UI
+internal/platform      Elevation detection + capability snapshot for Settings → Platform capabilities
 internal/update        Opt-in GitHub Releases check
 internal/version       Link-time version + public repo path for updates
 web/                   Embedded UI (index.html, style.css, app.js) via embed.FS
@@ -25,14 +28,15 @@ web/                   Embedded UI (index.html, style.css, app.js) via embed.FS
 
 ## Scan flow
 
-1. `POST /api/scan` validates targets against local subnets (or custom opt-in).
+1. `POST /api/scan` builds the same plan as `POST /api/scan/preview`: ranges deduplicated, IPv6 rejected, at most 1,024 distinct addresses (larger selections are refused, not truncated). It then checks the plan against local subnets (or custom opt-in) and claims the single scan slot under one lock. The run gets an ID; `/api/scan/status` reports its state (starting, running, completed, canceled, timed_out, failed), phase with counters, and hosts found so far.
 2. `discover.Engine.Discover` probes discovery ports; ICMP via system `ping` when Windows boost applies or Deep+elevated on Unix; active ARP who-has when Deep+elevated on Linux/macOS.
 3. On-link hosts in the OS ARP cache (resolved during the TCP dials) that no probe found are added as `arp-cache` (static/permanent rows excluded); MAC from ARP cache (and ARP replies) + OUI; reverse DNS runs concurrently; hosts tagged as self / gateway (or soft router guess), private MAC (U/L bit, no vendor) and duplicate IP (several ARP replies) when known.
-4. `scan.ScanHosts` probes findings ports on live hosts.
-5. `enrich.Results` adds lightweight HTTP/TLS/banner hints on relevant open ports.
+4. `scan.ScanHosts` probes findings ports on live hosts, recording open ports and ports that refused the connection.
+5. `enrich.Results` adds lightweight HTTP/TLS/banner hints on relevant open ports and records whether a protocol answered (`OpenPort.Protocol`, `Probe`). HTTP redirects and SSDP description fetches stay on the probed device's own IP.
 6. `discover.EnrichHostnames` fills empty names via NetBIOS then mDNS.
 7. `discover.EnrichLANIdentity` runs SSDP (known hosts) then SNMP `public` soft probe.
-8. `risk.Evaluate` builds findings; snapshot stored for UI/export (`POST /api/scan/cancel` aborts an in-flight run).
+8. `risk.Evaluate` builds findings: an open port alone is inferred and at most medium; a protocol answer makes a finding confirmed. `POST /api/scan/cancel` stops a run; what it saw is kept and flagged partial.
+9. `inventory.Store.Record` picks the network profile (gateway MAC + subnet), links hosts to devices, saves the snapshot and index, and applies retention. The UI reads devices, history, and comparisons from `/api/inventory`, `/api/devices/{id}`, `/api/history`, and `/api/changes`.
 
 ## Linux launcher
 
@@ -48,7 +52,7 @@ web/                   Embedded UI (index.html, style.css, app.js) via embed.FS
 
 `web/embed.go` embeds static assets. `api.uiHandler` replaces `__SESSION_TOKEN__` and `__APP_VERSION__` in `index.html`. Do not break those placeholders.
 
-Overview host rows use shared float tips (`data-tip`) for beginner-friendly help on Found via, open ports, names, MAC, and badges.
+The Devices table and device detail use shared float tips (`data-tip`) for beginner-friendly help on open ports. Device-supplied text is HTML-escaped with bidi control characters removed.
 
 ## Deep discovery honesty
 
