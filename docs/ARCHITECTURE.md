@@ -7,7 +7,8 @@ Network Sweeper is a stdlib-only Go program: one binary embeds a localhost web U
 ```
 cmd/networksweeper     CLI entry: flags, start API, open browser, signal shutdown
 scripts/install.sh     Linux curl|bash launcher + launch menu (not a scan UI)
-internal/api           Localhost HTTP, token/Origin hardening, scan orchestration, export
+internal/api           Localhost HTTP, token/Origin hardening, scan orchestration, JSON/CSV export
+                       (CSV cells from device text are neutralised against formulas)
 internal/discover      TCP discovery, optional ICMP/ARP, ARP cache MAC, reverse DNS,
                        NetBIOS/mDNS hostname fill, SSDP + SNMP soft probes
 internal/scan          Findings-port TCP connect scan + service labels
