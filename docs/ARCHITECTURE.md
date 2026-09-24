@@ -16,7 +16,7 @@ internal/scan          Findings-port TCP connect scan + service labels
 internal/enrich        Short HTTP title/Server, TLS cert summary, SSH/FTP/SMTP banners
 internal/risk          Findings with category, confidence, and evidence from ports / probes / host metadata
 internal/inventory     Saved history: snapshots, network profiles, device identity, annotations,
-                       finding reviews, comparisons (stdlib JSON, atomic writes, PID lockfile)
+                       finding reviews, comparisons (stdlib JSON, atomic writes, OS file lock)
 internal/netinfo       Interfaces, CIDR helpers, allowlist, default gateway (best-effort)
 internal/oui           Offline MAC vendor lookup: curated map, then embedded IEEE MA-L registry
                        (ieee.csv, refreshed by `make oui` / internal/oui/gen)

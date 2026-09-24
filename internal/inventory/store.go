@@ -39,10 +39,11 @@ const (
 // return copies.
 type Store struct {
 	mu     sync.Mutex
-	dir    string // empty in memory-only modes
+	dir    string   // empty in memory-only modes
+	lock   *os.File // held OS lock on dir/lock
 	status Status
 	inv    inventoryFile
-	snaps  map[string]*Snapshot // memory-only snapshots
+	snaps  map[string]*Snapshot // memory-only snapshots, and scans that failed to save
 }
 
 // Memory returns a store that keeps everything in memory for this session.
@@ -66,13 +67,14 @@ func Open(dir string) *Store {
 	if err := os.MkdirAll(filepath.Join(dir, scansDir), 0o700); err != nil {
 		return Memory(ModeUnavailable, fmt.Sprintf("Could not create %s: %v. History is kept in memory for this session only.", dir, err))
 	}
-	if err := acquireLock(filepath.Join(dir, lockName)); err != nil {
+	lock, err := acquireLock(filepath.Join(dir, lockName))
+	if err != nil {
 		return Memory(ModeUnavailable, err.Error()+" History is kept in memory for this session only.")
 	}
-	s := &Store{dir: dir, status: Status{Mode: ModePersistent, Dir: dir}, snaps: map[string]*Snapshot{}}
+	s := &Store{dir: dir, lock: lock, status: Status{Mode: ModePersistent, Dir: dir}, snaps: map[string]*Snapshot{}}
 	inv, err := loadInventory(dir)
 	if err != nil {
-		releaseLock(filepath.Join(dir, lockName))
+		lock.Close()
 		mem := Memory(ModeUnavailable, err.Error())
 		mem.status.Dir = dir
 		return mem
@@ -87,8 +89,11 @@ func Open(dir string) *Store {
 func (s *Store) Close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.dir != "" {
-		releaseLock(filepath.Join(s.dir, lockName))
+	if s.lock != nil {
+		// The lock file stays: removing it could let two processes lock
+		// different files of the same name.
+		s.lock.Close()
+		s.lock = nil
 		s.dir = ""
 	}
 }
@@ -128,6 +133,14 @@ func loadInventory(dir string) (inventoryFile, error) {
 	if inv.Retention <= 0 {
 		inv.Retention = DefaultRetention
 	}
+	// Scans that failed to save lived only in that session's memory.
+	kept := inv.Scans[:0]
+	for _, e := range inv.Scans {
+		if !e.Unsaved {
+			kept = append(kept, e)
+		}
+	}
+	inv.Scans = kept
 	inv.Version = SchemaVersion
 	return inv, nil
 }
@@ -217,13 +230,17 @@ func (s *Store) Record(snap *Snapshot) error {
 	p.LastScan = snap.FinishedAt
 	s.inv.LastProfileID = p.ID
 	s.assign(p, snap)
-	s.inv.Scans = append(s.inv.Scans, ScanEntry{
+	entry := ScanEntry{
 		ID: snap.ID, ProfileID: p.ID, StartedAt: snap.StartedAt, FinishedAt: snap.FinishedAt,
 		State: snap.State, Partial: snap.Partial, Ranges: snap.Coverage.Ranges, Methods: snap.Coverage.Methods,
 		Hosts: len(snap.Hosts), Findings: len(snap.Findings),
-	})
+	}
 
+	// A scan whose file could not be written stays in memory for this
+	// session, so it can still be compared and exported, and retention does
+	// not run: older history is never removed while storage is failing.
 	var saveErr error
+	saved := true
 	if s.dir == "" {
 		s.snaps[snap.ID] = cloneSnapshot(snap)
 	} else {
@@ -233,31 +250,41 @@ func (s *Store) Record(snap *Snapshot) error {
 		}
 		if err != nil {
 			saveErr = fmt.Errorf("could not save scan %s: %w", snap.ID, err)
+			saved = false
+			entry.Unsaved = true
+			s.snaps[snap.ID] = cloneSnapshot(snap)
 		}
 	}
-	s.applyRetention()
-	if err := s.persist(); err != nil && saveErr == nil {
-		saveErr = fmt.Errorf("could not save the inventory: %w", err)
+	s.inv.Scans = append(s.inv.Scans, entry)
+	var dropped []string
+	if saved {
+		dropped = s.trimRetention()
+	}
+	if err := s.persist(); err != nil {
+		if saveErr == nil {
+			saveErr = fmt.Errorf("could not save the inventory: %w", err)
+		}
+	} else {
+		// Old files go only once the index no longer lists them.
+		s.removeSnapshots(dropped)
 	}
 	s.noteWrite(saveErr)
 	return saveErr
 }
 
-// applyRetention drops the oldest scans beyond the limit, with their files and
-// device history rows. Devices and annotations stay. Caller holds s.mu.
-func (s *Store) applyRetention() {
+// trimRetention drops the oldest scans beyond the limit from the index and
+// device history, and returns their IDs. Devices and annotations stay. The
+// caller deletes the files after the new index is written. Caller holds s.mu.
+func (s *Store) trimRetention() []string {
 	extra := len(s.inv.Scans) - s.inv.Retention
 	if extra <= 0 {
-		return
+		return nil
 	}
+	var ids []string
 	dropped := map[string]bool{}
 	for _, e := range s.inv.Scans[:extra] {
+		ids = append(ids, e.ID)
 		dropped[e.ID] = true
-		if s.dir == "" {
-			delete(s.snaps, e.ID)
-		} else {
-			os.Remove(s.snapshotPath(e.ID))
-		}
 	}
 	s.inv.Scans = append([]ScanEntry(nil), s.inv.Scans[extra:]...)
 	for _, d := range s.inv.Devices {
@@ -268,6 +295,17 @@ func (s *Store) applyRetention() {
 			}
 		}
 		d.History = kept
+	}
+	return ids
+}
+
+// removeSnapshots deletes scans that are no longer indexed. Caller holds s.mu.
+func (s *Store) removeSnapshots(ids []string) {
+	for _, id := range ids {
+		delete(s.snaps, id)
+		if s.dir != "" {
+			os.Remove(s.snapshotPath(id))
+		}
 	}
 }
 
@@ -282,10 +320,10 @@ func (s *Store) loadSnapshot(id string) (*Snapshot, error) {
 	if !s.hasScan(id) || !validID(id) {
 		return nil, fmt.Errorf("scan %s is not in the retained history", id)
 	}
+	if snap := s.snaps[id]; snap != nil {
+		return cloneSnapshot(snap), nil
+	}
 	if s.dir == "" {
-		if snap := s.snaps[id]; snap != nil {
-			return cloneSnapshot(snap), nil
-		}
 		return nil, fmt.Errorf("scan %s is not available in this session", id)
 	}
 	b, err := os.ReadFile(s.snapshotPath(id))
@@ -439,8 +477,12 @@ func (s *Store) SetRetention(n int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.inv.Retention = n
-	s.applyRetention()
-	return s.persist()
+	dropped := s.trimRetention()
+	if err := s.persist(); err != nil {
+		return err
+	}
+	s.removeSnapshots(dropped)
+	return nil
 }
 
 // DeleteHistory removes every saved scan and device history row, keeping

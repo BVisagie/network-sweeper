@@ -67,6 +67,10 @@ type Profile struct {
 	Verified bool      `json:"verified"`
 	Created  time.Time `json:"created"`
 	LastScan time.Time `json:"lastScan"`
+	// SharedMACs lists MACs ever seen answering for several addresses (a
+	// Wi-Fi extender or proxy ARP). Hosts with these MACs are always tracked by
+	// address, even when a narrower scan sees only one of them.
+	SharedMACs []string `json:"sharedMacs,omitempty"`
 }
 
 // Identity bases.
@@ -139,6 +143,9 @@ type ScanEntry struct {
 	Methods    []string  `json:"methods"`
 	Hosts      int       `json:"hosts"`
 	Findings   int       `json:"findings"`
+	// Unsaved marks a scan whose file could not be written; it is available
+	// from memory until the app exits.
+	Unsaved bool `json:"unsaved,omitempty"`
 }
 
 // Review is the user's acknowledgement of a finding on a device. Fingerprint

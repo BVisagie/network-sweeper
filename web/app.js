@@ -1562,8 +1562,13 @@
     a.click();
     a.remove();
   }
-  $("export-json").addEventListener("click", () => download("/api/export?format=json"));
-  $("export-csv").addEventListener("click", () => download("/api/export?format=csv"));
+  // "Latest scan" is the selected network's newest retained scan.
+  function exportLatest(format) {
+    const id = state.inv?.latestScan?.id;
+    download("/api/export?format=" + format + (id ? "&scan=" + encodeURIComponent(id) : ""));
+  }
+  $("export-json").addEventListener("click", () => exportLatest("json"));
+  $("export-csv").addEventListener("click", () => exportLatest("csv"));
   $("export-inventory").addEventListener("click", () =>
     download("/api/export?what=inventory" + (state.inv?.profileId ? "&profile=" + encodeURIComponent(state.inv.profileId) : ""))
   );

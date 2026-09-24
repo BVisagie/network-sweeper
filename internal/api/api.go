@@ -245,8 +245,9 @@ func (s *Server) handleResults(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.lastScan)
 }
 
-// handleExport downloads the current scan, a retained scan (?scan=ID), or the
-// device inventory with annotations (?what=inventory).
+// handleExport downloads a retained scan (?scan=ID), else this session's last
+// scan, else the newest retained one; or the device inventory with
+// annotations (?what=inventory).
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	if q.Get("what") == "inventory" {
@@ -269,7 +270,14 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	snap := s.lastScan
 	s.mu.Unlock()
-	if id := q.Get("scan"); id != "" {
+	id := q.Get("scan")
+	if id == "" && snap == nil {
+		// Nothing scanned this session: fall back to the newest retained scan.
+		if latest := s.latestScan(s.profileParam(r)); latest != nil {
+			id = latest.ID
+		}
+	}
+	if id != "" {
 		stored, err := s.Store.Snapshot(id)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)

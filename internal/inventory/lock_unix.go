@@ -1,16 +1,26 @@
-//go:build !windows
+//go:build unix
 
 package inventory
 
 import (
 	"errors"
+	"os"
 	"syscall"
 )
 
-func processAlive(pid int) bool {
-	if pid <= 0 {
-		return false
+// lockFile opens path and takes a non-blocking flock. Each open is its own
+// lock holder, so a second open in the same process is refused too.
+func lockFile(path string) (*os.File, error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
 	}
-	err := syscall.Kill(pid, 0)
-	return err == nil || errors.Is(err, syscall.EPERM)
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, errLocked
+		}
+		return nil, err
+	}
+	return f, nil
 }

@@ -3,7 +3,7 @@ package inventory
 import (
 	"os"
 	"path/filepath"
-	"strconv"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -127,26 +127,41 @@ func TestIdentityAndComparison(t *testing.T) {
 	if a.ID == b.ID || a.Basis != BasisAddress || len(a.Uncertain) == 0 {
 		t.Fatalf("shared MAC merged or not flagged: %+v %+v", a, b)
 	}
+	tv := "TV"
+	if _, err := s.Annotate(a.ID, Annotation{Name: &tv}); err != nil {
+		t.Fatal(err)
+	}
+	// Rescanning each address alone must keep both identities apart.
+	one := snapAt("s6", 50, gw, []discover.Host{{IP: "192.168.1.30", MAC: "00:ee:ee:ee:ee:ee"}}, nil)
+	two := snapAt("s7", 60, gw, []discover.Host{{IP: "192.168.1.31", MAC: "00:ee:ee:ee:ee:ee"}}, nil)
+	for _, snap := range []*Snapshot{one, two} {
+		if err := s.Record(snap); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if d := deviceOf(t, s, one, "192.168.1.30"); d.ID != a.ID {
+		t.Fatalf("narrow rescan split the identity: %+v", d)
+	}
+	if d := deviceOf(t, s, two, "192.168.1.31"); d.ID != b.ID || d.Name != "" {
+		t.Fatalf("narrow rescan moved annotations across shared-MAC devices: %+v", d)
+	}
 }
 
 // TestStorageRecovery checks that saved data survives a restart, that damaged
 // or newer files are left untouched, and that a second instance is locked out.
 func TestStorageRecovery(t *testing.T) {
 	dir := t.TempDir()
-	// A lock naming a live process (our parent) keeps this process out.
-	if err := os.WriteFile(filepath.Join(dir, lockName), []byte(strconv.Itoa(os.Getppid())), 0o600); err != nil {
+	// A lock file left by a crashed run holds no OS lock and does not block.
+	if err := os.WriteFile(filepath.Join(dir, lockName), []byte("999999"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if st := Open(dir).Status(); st.Mode != ModeUnavailable || !strings.Contains(st.Reason, "Another Network Sweeper") {
-		t.Fatalf("live lock ignored: %+v", st)
-	}
-	os.Remove(filepath.Join(dir, lockName))
 	s := Open(dir)
 	if st := s.Status(); st.Mode != ModePersistent {
 		t.Fatalf("open: %+v", st)
 	}
-	if st := Open(dir).Status(); st.Mode != ModeUnavailable {
-		t.Fatalf("second open in this process not locked out: %+v", st)
+	// While the lock is held, a second writer (here, a second open) is kept out.
+	if st := Open(dir).Status(); st.Mode != ModeUnavailable || !strings.Contains(st.Reason, "Another Network Sweeper") {
+		t.Fatalf("second writer not locked out: %+v", st)
 	}
 	snap := snapAt("s1", 0, "aa:aa:aa:aa:aa:01", []discover.Host{{IP: "192.168.1.10", MAC: "00:11:22:33:44:55"}}, nil)
 	if err := s.Record(snap); err != nil {
@@ -168,8 +183,35 @@ func TestStorageRecovery(t *testing.T) {
 		t.Fatalf("restart lost data: ok=%v device=%+v scans=%d", ok, d, len(s.Scans("")))
 	}
 
+	// A scan that cannot be written must not cost older history: retention
+	// waits, and the new scan stays readable from memory.
+	if runtime.GOOS != "windows" && os.Geteuid() != 0 {
+		if err := s.SetRetention(1); err != nil {
+			t.Fatal(err)
+		}
+		kept := s.Scans("")[0].ID
+		scans := filepath.Join(dir, scansDir)
+		if err := os.Chmod(scans, 0o500); err != nil {
+			t.Fatal(err)
+		}
+		err := s.Record(snapAt("s3", 7, "aa:aa:aa:aa:aa:01", []discover.Host{{IP: "192.168.1.10", MAC: "00:11:22:33:44:55"}}, nil))
+		os.Chmod(scans, 0o700)
+		if err == nil {
+			t.Fatal("expected the snapshot write to fail")
+		}
+		if _, err := s.Snapshot(kept); err != nil {
+			t.Fatalf("older snapshot lost after a failed save: %v", err)
+		}
+		if _, err := s.Snapshot("s3"); err != nil {
+			t.Fatalf("unsaved scan not readable this session: %v", err)
+		}
+		if err := s.SetRetention(100); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	// A damaged snapshot gives an actionable error, not a crash or overwrite.
-	if err := os.WriteFile(filepath.Join(dir, scansDir, "s1.json"), []byte("{truncated"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, scansDir, "s2.json"), []byte("{truncated"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Compare(d.ProfileID, "", ""); err == nil || !strings.Contains(err.Error(), "damaged") {

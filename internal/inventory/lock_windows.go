@@ -4,26 +4,27 @@ package inventory
 
 import (
 	"errors"
+	"os"
 	"syscall"
 )
 
-const (
-	processQueryLimitedInformation = 0x1000
-	stillActive                    = 259
-)
+// errorSharingViolation is ERROR_SHARING_VIOLATION; the syscall package does not name it.
+const errorSharingViolation = syscall.Errno(32)
 
-func processAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	h, err := syscall.OpenProcess(processQueryLimitedInformation, false, uint32(pid))
+// lockFile opens path with no sharing allowed, so no other handle can open it
+// until this one closes.
+func lockFile(path string) (*os.File, error) {
+	p, err := syscall.UTF16PtrFromString(path)
 	if err != nil {
-		return errors.Is(err, syscall.ERROR_ACCESS_DENIED)
+		return nil, err
 	}
-	defer syscall.CloseHandle(h)
-	var code uint32
-	if err := syscall.GetExitCodeProcess(h, &code); err != nil {
-		return true
+	h, err := syscall.CreateFile(p, syscall.GENERIC_READ|syscall.GENERIC_WRITE, 0, nil,
+		syscall.OPEN_ALWAYS, syscall.FILE_ATTRIBUTE_NORMAL, 0)
+	if err != nil {
+		if errors.Is(err, errorSharingViolation) {
+			return nil, errLocked
+		}
+		return nil, err
 	}
-	return code == stillActive
+	return os.NewFile(uintptr(h), path), nil
 }

@@ -53,9 +53,10 @@ func defaultProfileName(p *Profile) string {
 // assign links each host to a device in profile p, creating devices as needed.
 //
 // A host matches on its MAC within the profile. Hosts without a MAC, and hosts
-// whose MAC answered for several addresses in this scan (a Wi-Fi extender or
-// proxy ARP), are tracked by address instead, so one MAC never merges
-// different machines. Hostname, vendor, or IP alone never link a host to a
+// whose MAC has answered for several addresses in any scan of this profile (a
+// Wi-Fi extender or proxy ARP), are tracked by address instead, so one MAC
+// never merges different machines, even when a later scan covers only one of
+// its addresses. Hostname, vendor, or IP alone never link a host to a
 // MAC-identified device, so a reused DHCP address does not inherit another
 // device's names and notes. Caller holds s.mu.
 func (s *Store) assign(p *Profile, snap *Snapshot) {
@@ -63,6 +64,16 @@ func (s *Store) assign(p *Profile, snap *Snapshot) {
 	for _, h := range snap.Hosts {
 		if h.MAC != "" {
 			macIPs[strings.ToLower(h.MAC)]++
+		}
+	}
+	shared := map[string]bool{}
+	for _, m := range p.SharedMACs {
+		shared[m] = true
+	}
+	for m, n := range macIPs {
+		if n > 1 && !shared[m] {
+			shared[m] = true
+			p.SharedMACs = append(p.SharedMACs, m)
 		}
 	}
 	portsByIP := map[string]scan.Result{}
@@ -95,9 +106,9 @@ func (s *Store) assign(p *Profile, snap *Snapshot) {
 		case mac == "":
 			basis, key = BasisAddress, "addr|"+h.IP
 			notes = append(notes, "No MAC address was visible, so this device is tracked by its IP address. If another device takes the address, it will appear here.")
-		case macIPs[mac] > 1:
+		case shared[mac]:
 			basis, key = BasisAddress, "addr|"+h.IP
-			notes = append(notes, fmt.Sprintf("MAC %s answered for %d addresses in this scan (a Wi-Fi extender or proxy ARP does this), so this device is tracked by its IP address.", mac, macIPs[mac]))
+			notes = append(notes, fmt.Sprintf("MAC %s has answered for several addresses on this network (a Wi-Fi extender or proxy ARP does this), so this device is tracked by its IP address.", mac))
 		}
 		if basis == BasisMAC && h.PrivateMAC {
 			notes = append(notes, "Private (randomised) MAC: if the device picks a new one, it will show up as a new device.")
@@ -124,8 +135,8 @@ func (s *Store) assign(p *Profile, snap *Snapshot) {
 			ScanID: snap.ID, At: at, Partial: snap.Partial, Host: *h,
 			Ports: r.Ports, Closed: r.Closed, Findings: findingsByIP[h.IP],
 		}
-		// No two hosts in one scan share a device: MAC keys are used only for a
-		// MAC seen on a single address, and address keys are per IP.
+		// No two hosts in one scan share a device: a MAC seen on several
+		// addresses is marked shared above, and address keys are per IP.
 		d.Last = obs
 		d.LastSeen = at
 		d.LastScanID = snap.ID
