@@ -35,12 +35,15 @@ func TestParseARPLinuxSample(t *testing.T) {
 	}
 }
 
-func TestLooksLikeMAC(t *testing.T) {
-	if !looksLikeMAC("aa:bb:cc:dd:ee:ff") {
+func TestNormalizeMAC(t *testing.T) {
+	if normalizeMAC("aa:bb:cc:dd:ee:ff") != "aa:bb:cc:dd:ee:ff" {
 		t.Fatal("expected mac")
 	}
-	if looksLikeMAC("aa:bb:cc") {
-		t.Fatal("short should fail")
+	if got := normalizeMAC("A4:5e:60:e8:1:2d"); got != "a4:5e:60:e8:01:2d" { // macOS arp -an
+		t.Fatalf("got %q", got)
+	}
+	if normalizeMAC("aa:bb:cc") != "" || normalizeMAC("zz:bb:cc:dd:ee:ff") != "" {
+		t.Fatal("non-MAC should fail")
 	}
 }
 

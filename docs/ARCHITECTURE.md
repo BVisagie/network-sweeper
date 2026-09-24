@@ -26,7 +26,7 @@ web/                   Embedded UI (index.html, style.css, app.js) via embed.FS
 
 1. `POST /api/scan` validates targets against local subnets (or custom opt-in).
 2. `discover.Engine.Discover` probes discovery ports; ICMP via system `ping` when Windows boost applies or Deep+elevated on Unix; active ARP who-has when Deep+elevated on Linux/macOS.
-3. On-link hosts in the OS ARP cache (resolved during the TCP dials) that no probe found are added as `arp-cache`; MAC from ARP cache (and ARP replies) + OUI; reverse DNS runs concurrently; hosts tagged as self / gateway (or soft router guess), private MAC (U/L bit, no vendor) and duplicate IP (several ARP replies) when known.
+3. On-link hosts in the OS ARP cache (resolved during the TCP dials) that no probe found are added as `arp-cache` (static/permanent rows excluded); MAC from ARP cache (and ARP replies) + OUI; reverse DNS runs concurrently; hosts tagged as self / gateway (or soft router guess), private MAC (U/L bit, no vendor) and duplicate IP (several ARP replies) when known.
 4. `scan.ScanHosts` probes findings ports on live hosts.
 5. `enrich.Results` adds lightweight HTTP/TLS/banner hints on relevant open ports.
 6. `discover.EnrichHostnames` fills empty names via NetBIOS then mDNS.

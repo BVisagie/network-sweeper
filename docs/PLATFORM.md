@@ -38,7 +38,7 @@ Legend: **Available** = works with current privileges · **Needs elevation** = f
 
 ## Discovery incompleteness (important)
 
-A host that does not accept connections on any **discovery** port can still appear via the OS **ARP cache** (`arp-cache`): every TCP dial makes the OS resolve the target's MAC first, so on-link hosts that answer ARP are listed without elevation. Hosts off the local segment (routed custom CIDRs), behind client isolation, or that ignore ARP too will **not appear at all** unless ICMP finds them. A device that just left the network can linger in the ARP cache for a minute or so.
+A host that does not accept connections on any **discovery** port can still appear via the OS **ARP cache** (`arp-cache`): every TCP dial makes the OS resolve the target's MAC first, so on-link hosts that answer ARP are listed without elevation. Hosts off the local segment (routed custom CIDRs), behind client isolation, or that ignore ARP too will **not appear at all** unless ICMP finds them. A device that just left the network can linger in the ARP cache for a minute or so. Static/permanent ARP entries are never listed this way, since the OS uses them without asking the network.
 
 Discovery ports (coverage-oriented) are separate from findings ports (risk/service labeling).
 

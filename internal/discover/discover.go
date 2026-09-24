@@ -205,31 +205,18 @@ func (e *Engine) Discover(ctx context.Context, opt Options) (Result, error) {
 		}
 	}
 
-	// Every TCP dial above made the OS resolve the target's MAC first, so the
-	// ARP cache now also holds on-link hosts that closed every discovery port.
-	// Promote those to live hosts: no elevation needed on any OS.
 	enumerated := make(map[string]bool, len(ips))
 	for _, ip := range ips {
 		enumerated[ip.String()] = true
 	}
-	arpTable := ReadARPTable()
-	for ip, mac := range arpTable {
-		if _, ok := alive[ip]; ok || !enumerated[ip] || !unicastMAC(mac) {
-			continue
-		}
-		alive[ip] = &Host{
-			IP:       ip,
-			MAC:      mac,
-			AliveVia: []string{"arp-cache"},
-			LastSeen: time.Now(),
-		}
-	}
+	arpTable := readARPEntries()
+	promoteARPCache(alive, arpTable, enumerated)
 
 	out := make([]Host, 0, len(alive))
 	for _, h := range alive {
 		if h.MAC == "" {
-			if mac, ok := arpTable[h.IP]; ok {
-				h.MAC = mac
+			if e, ok := arpTable[h.IP]; ok {
+				h.MAC = e.MAC
 			}
 		}
 		out = append(out, *h)
@@ -244,6 +231,25 @@ func (e *Engine) Discover(ctx context.Context, opt Options) (Result, error) {
 		HostsEnumerated: total,
 		HostsAvailable:  available,
 	}, ctx.Err()
+}
+
+// promoteARPCache adds hosts that only the ARP cache knows about. Every TCP
+// dial made the OS resolve the target's MAC first, so the cache holds on-link
+// hosts that closed every discovery port: no elevation needed on any OS.
+// Static rows are skipped (the OS never asked the network for them), as are
+// non-unicast MACs and addresses outside the enumerated targets.
+func promoteARPCache(alive map[string]*Host, table map[string]arpEntry, enumerated map[string]bool) {
+	for ip, e := range table {
+		if _, ok := alive[ip]; ok || e.Static || !enumerated[ip] || !unicastMAC(e.MAC) {
+			continue
+		}
+		alive[ip] = &Host{
+			IP:       ip,
+			MAC:      e.MAC,
+			AliveVia: []string{"arp-cache"},
+			LastSeen: time.Now(),
+		}
+	}
 }
 
 func ipLess(a, b string) bool {
