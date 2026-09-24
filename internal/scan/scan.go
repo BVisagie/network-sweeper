@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sort"
 	"sync"
 	"time"
 )
@@ -73,10 +74,14 @@ type OpenPort struct {
 type Result struct {
 	IP    string     `json:"ip"`
 	Ports []OpenPort `json:"ports"`
+	// Closed lists findings ports that actively refused the connection. A
+	// timeout proves nothing, so ports that timed out are in neither list.
+	Closed []int `json:"closed,omitempty"`
 }
 
-// ScanHosts probes findings ports on each host IP.
-func ScanHosts(ctx context.Context, ips []string, timeout time.Duration, concurrency int) ([]Result, error) {
+// ScanHosts probes findings ports on each host IP. progress, when set, is
+// called after each host finishes.
+func ScanHosts(ctx context.Context, ips []string, timeout time.Duration, concurrency int, progress func(done, total int)) ([]Result, error) {
 	if timeout <= 0 {
 		timeout = 350 * time.Millisecond
 	}
@@ -93,18 +98,23 @@ func ScanHosts(ctx context.Context, ips []string, timeout time.Duration, concurr
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			ports := scanHost(ctx, ip, timeout, sem)
+			ports, closed := scanHost(ctx, ip, timeout, sem)
 			mu.Lock()
-			out = append(out, Result{IP: ip, Ports: ports})
+			out = append(out, Result{IP: ip, Ports: ports, Closed: closed})
+			done := len(out)
 			mu.Unlock()
+			if progress != nil {
+				progress(done, len(ips))
+			}
 		}()
 	}
 	wg.Wait()
 	return out, ctx.Err()
 }
 
-func scanHost(ctx context.Context, ip string, timeout time.Duration, sem chan struct{}) []OpenPort {
+func scanHost(ctx context.Context, ip string, timeout time.Duration, sem chan struct{}) ([]OpenPort, []int) {
 	var ports []OpenPort
+	var closed []int
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	for _, port := range FindingsPorts {
@@ -123,6 +133,11 @@ func scanHost(ctx context.Context, ip string, timeout time.Duration, sem chan st
 			d := net.Dialer{Timeout: timeout}
 			conn, err := d.DialContext(ctx, "tcp", addr)
 			if err != nil {
+				if refused(err) {
+					mu.Lock()
+					closed = append(closed, port)
+					mu.Unlock()
+				}
 				return
 			}
 			_ = conn.Close()
@@ -136,5 +151,7 @@ func scanHost(ctx context.Context, ip string, timeout time.Duration, sem chan st
 		}()
 	}
 	wg.Wait()
-	return ports
+	sort.Slice(ports, func(i, j int) bool { return ports[i].Port < ports[j].Port })
+	sort.Ints(closed)
+	return ports, closed
 }

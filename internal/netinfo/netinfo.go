@@ -199,6 +199,27 @@ func HostsInCIDR(cidr *net.IPNet, maxHosts int) []net.IP {
 	return hosts
 }
 
+// UniqueHosts returns the usable IPv4 addresses across targets, each once, in
+// target order. ok is false when the targets hold more than max distinct
+// addresses: callers refuse such a selection rather than scan a prefix of it.
+func UniqueHosts(targets []*net.IPNet, max int) (hosts []net.IP, ok bool) {
+	seen := map[string]bool{}
+	for _, t := range targets {
+		for _, ip := range HostsInCIDR(t, max+1) {
+			key := ip.String()
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			if len(hosts) == max {
+				return nil, false
+			}
+			hosts = append(hosts, ip)
+		}
+	}
+	return hosts, true
+}
+
 // CountUsableHosts returns how many host addresses a CIDR would yield (network/broadcast skipped for masks < 31).
 func CountUsableHosts(cidr *net.IPNet) int {
 	if cidr == nil || cidr.IP.To4() == nil {

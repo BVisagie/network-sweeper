@@ -160,7 +160,7 @@ func TestReserveScanAdmitsOne(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, _, err := s.reserveScan(nets, nets, false); err == nil {
+			if _, _, err := s.reserveScan(&scanPlan{targets: nets}, nets, false); err == nil {
 				admitted.Add(1)
 			}
 		}()

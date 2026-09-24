@@ -1006,7 +1006,12 @@
         pollTimer = null;
         setScanning(false);
         status.classList.remove("is-busy");
-        status.textContent = "Scan finished";
+        const ended = {
+          canceled: "Scan stopped — results are partial",
+          timed_out: "Scan hit the time limit — results are partial",
+          failed: "Scan failed" + (st.scan?.error ? ": " + st.scan.error : ""),
+        };
+        status.textContent = ended[st.scan?.state] || "Scan finished";
         $("progress-bar").style.width = "100%";
         const results = await api("/api/results");
         renderResults(results);

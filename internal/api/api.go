@@ -5,12 +5,10 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/fs"
 	"net"
 	"net/http"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -19,7 +17,6 @@ import (
 	"github.com/BVisagie/network-sweeper/internal/discover"
 	"github.com/BVisagie/network-sweeper/internal/enrich"
 	"github.com/BVisagie/network-sweeper/internal/netinfo"
-	"github.com/BVisagie/network-sweeper/internal/oui"
 	"github.com/BVisagie/network-sweeper/internal/platform"
 	"github.com/BVisagie/network-sweeper/internal/risk"
 	"github.com/BVisagie/network-sweeper/internal/scan"
@@ -40,14 +37,19 @@ type Server struct {
 	mu           sync.Mutex
 	customOptIn  bool
 	updatesOptIn bool
-	lastScan     *ScanSnapshot
+	lastScan     *ScanSnapshot // most recent finished run, whatever its end state
 	scanRunning  bool
-	scanProgress string
 	cancelScan   context.CancelFunc
+	run          *scanRun // active or most recent run
 }
 
-// ScanSnapshot is the last completed scan result.
+// ScanSnapshot is the result of one finished run. Canceled and timed-out runs
+// keep what they observed, flagged Partial.
 type ScanSnapshot struct {
+	ID          string          `json:"id"`
+	State       string          `json:"state"`
+	Partial     bool            `json:"partial"`
+	Coverage    scanPlan        `json:"coverage"`
 	StartedAt   time.Time       `json:"startedAt"`
 	FinishedAt  time.Time       `json:"finishedAt"`
 	DurationMs  int64           `json:"durationMs"`
@@ -84,6 +86,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/interfaces", s.withSecurity(s.handleInterfaces))
 	mux.HandleFunc("/api/platform", s.withSecurity(s.handlePlatform))
 	mux.HandleFunc("/api/scan", s.withSecurity(s.handleScan))
+	mux.HandleFunc("/api/scan/preview", s.withSecurity(s.handleScanPreview))
 	mux.HandleFunc("/api/scan/status", s.withSecurity(s.handleScanStatus))
 	mux.HandleFunc("/api/scan/cancel", s.withSecurity(s.handleScanCancel))
 	mux.HandleFunc("/api/results", s.withSecurity(s.handleResults))
@@ -191,11 +194,39 @@ func (s *Server) handleInterfaces(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"interfaces":     ifaces,
 		"localSubnets":   cidrs,
+		"subnets":        subnetChoices(ifaces, locals),
+		"addressLimit":   scanAddressLimit,
 		"discoveryPorts": discover.DiscoveryPorts,
 		"findingsPorts":  scan.FindingsPorts,
 		"gatewayIp":      netinfo.DefaultGatewayIPv4(),
 		"localIps":       keys(netinfo.LocalIPv4Set()),
 	})
+}
+
+// subnetChoice is one local subnet offered in the scan scope picker.
+type subnetChoice struct {
+	CIDR      string   `json:"cidr"`
+	Ifaces    []string `json:"interfaces"`
+	Addresses int      `json:"addresses"`
+	Fits      bool     `json:"fits"` // within the per-scan address limit on its own
+}
+
+func subnetChoices(ifaces []netinfo.InterfaceInfo, locals []*net.IPNet) []subnetChoice {
+	out := make([]subnetChoice, 0, len(locals))
+	for _, n := range locals {
+		c := subnetChoice{CIDR: n.String(), Addresses: netinfo.CountUsableHosts(n)}
+		c.Fits = c.Addresses <= scanAddressLimit
+		for _, i := range ifaces {
+			for _, cidr := range i.CIDRs {
+				if _, in, err := net.ParseCIDR(cidr); err == nil && in.String() == c.CIDR {
+					c.Ifaces = append(c.Ifaces, i.Name)
+					break
+				}
+			}
+		}
+		out = append(out, c)
+	}
+	return out
 }
 
 func keys(m map[string]bool) []string {
@@ -208,229 +239,6 @@ func keys(m map[string]bool) []string {
 
 func (s *Server) handlePlatform(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, platform.Snapshot(s.Elevated))
-}
-
-type scanRequest struct {
-	Targets     []string `json:"targets"`
-	Deep        bool     `json:"deep"`
-	CustomOptIn bool     `json:"customOptIn"`
-}
-
-func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "POST required", http.StatusMethodNotAllowed)
-		return
-	}
-	var req scanRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid json", http.StatusBadRequest)
-		return
-	}
-
-	local, err := netinfo.LocalSubnets()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	var targets []*net.IPNet
-	if len(req.Targets) == 0 {
-		targets = local
-	} else {
-		for _, t := range req.Targets {
-			_, n, err := net.ParseCIDR(strings.TrimSpace(t))
-			if err != nil {
-				http.Error(w, fmt.Sprintf("invalid target %q", t), http.StatusBadRequest)
-				return
-			}
-			targets = append(targets, n)
-		}
-	}
-	if len(targets) == 0 {
-		http.Error(w, "no scan targets", http.StatusBadRequest)
-		return
-	}
-
-	ctx, custom, err := s.reserveScan(targets, local, req.CustomOptIn)
-	if errors.Is(err, errScanRunning) {
-		http.Error(w, err.Error(), http.StatusConflict)
-		return
-	}
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusForbidden)
-		return
-	}
-
-	go s.runScan(ctx, targets, req.Deep, custom)
-
-	writeJSON(w, map[string]any{"status": "started"})
-}
-
-var errScanRunning = errors.New("scan already running")
-
-// reserveScan checks the range and claims the single scan slot under one lock,
-// so simultaneous requests cannot both start a scan.
-func (s *Server) reserveScan(targets, local []*net.IPNet, customOptIn bool) (context.Context, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.scanRunning {
-		return nil, false, errScanRunning
-	}
-	// Per-scan opt-in from the request, or Settings toggle — scan body does not permanently sticky-set settings.
-	custom := customOptIn || s.customOptIn
-	if err := netinfo.RangeAllowed(targets, local, custom); err != nil {
-		return nil, false, err
-	}
-	s.scanRunning = true
-	s.scanProgress = "starting"
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	s.cancelScan = cancel
-	return ctx, custom, nil
-}
-
-func (s *Server) handleScanCancel(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "POST required", http.StatusMethodNotAllowed)
-		return
-	}
-	s.mu.Lock()
-	cancel := s.cancelScan
-	running := s.scanRunning
-	s.mu.Unlock()
-	if !running || cancel == nil {
-		writeJSON(w, map[string]any{"status": "idle"})
-		return
-	}
-	cancel()
-	writeJSON(w, map[string]any{"status": "canceling"})
-}
-
-func (s *Server) runScan(ctx context.Context, targets []*net.IPNet, deep, custom bool) {
-	defer func() {
-		s.mu.Lock()
-		s.scanRunning = false
-		s.cancelScan = nil
-		s.mu.Unlock()
-	}()
-
-	gateway := netinfo.DefaultGatewayIPv4()
-	selfIPs := netinfo.LocalIPv4Set()
-
-	snap := &ScanSnapshot{
-		StartedAt:   time.Now().UTC(),
-		Deep:        deep && s.Elevated,
-		CustomRange: custom,
-		GatewayIP:   gateway,
-		Warning:     "In unprivileged mode, a host that does not accept connections on any discovery port appears only if it answered the OS's ARP lookup (arp-cache); hosts off the local segment will not appear at all.",
-	}
-	for _, t := range targets {
-		snap.Targets = append(snap.Targets, t.String())
-	}
-	useICMP := runtime.GOOS == "windows" || (deep && s.Elevated)
-	useARP := deep && s.Elevated && discover.ARPSweepSupported()
-	if useICMP || useARP {
-		snap.Warning = "A host that does not accept connections on any discovery port (and is not found via ICMP"
-		if useARP {
-			snap.Warning += "/ARP"
-		}
-		snap.Warning += ") and is not in the OS ARP cache will not appear at all."
-	}
-	if deep && !s.Elevated {
-		if runtime.GOOS == "windows" {
-			snap.Warning += " Deep discovery was requested without Admin; Windows still tries system ping as a best-effort boost. Run as administrator for more reliable quiet-host discovery. Active ARP sweep is not available on Windows in this version."
-		} else {
-			snap.Warning += " Deep discovery requested but process is not elevated; ICMP/ARP are skipped. Relaunch with sudo, then enable Deep discovery."
-		}
-	}
-
-	eng := discover.NewEngine()
-	res, err := eng.Discover(ctx, discover.Options{
-		Targets:     targets,
-		Deep:        deep && s.Elevated,
-		UseICMP:     useICMP,
-		UseARP:      useARP,
-		Concurrency: 128,
-		MaxHosts:    1024,
-		Progress: func(done, total int, msg string) {
-			s.mu.Lock()
-			s.scanProgress = fmt.Sprintf("discovery %d/%d: %s", done, total, msg)
-			s.mu.Unlock()
-		},
-	})
-	if err != nil && ctx.Err() == nil {
-		snap.Error = err.Error()
-	}
-	if ctx.Err() != nil {
-		snap.Warning += " Scan was canceled."
-	}
-	if res.Truncated {
-		snap.Warning += fmt.Sprintf(" Address list was truncated to %d hosts (subnet(s) contain about %d usable addresses).", res.HostsEnumerated, res.HostsAvailable)
-	}
-
-	hosts := res.Hosts
-	for i := range hosts {
-		if hosts[i].MAC != "" {
-			hosts[i].Vendor = oui.Lookup(hosts[i].MAC)
-			hosts[i].PrivateMAC = hosts[i].Vendor == "" && oui.LocallyAdministered(hosts[i].MAC)
-		}
-		if selfIPs[hosts[i].IP] {
-			hosts[i].IsSelf = true
-		}
-		if gateway != "" && hosts[i].IP == gateway {
-			hosts[i].IsGateway = true
-		} else if gateway == "" && netinfo.LooksLikeCommonRouter(hosts[i].IP) {
-			hosts[i].LikelyRouterGuess = true
-		}
-	}
-	snap.Hosts = hosts
-
-	ips := make([]string, 0, len(hosts))
-	for _, h := range hosts {
-		ips = append(ips, h.IP)
-	}
-	s.mu.Lock()
-	s.scanProgress = "scanning ports"
-	s.mu.Unlock()
-
-	ports, scanErr := scan.ScanHosts(ctx, ips, 350*time.Millisecond, 64)
-	if scanErr != nil && ctx.Err() == nil {
-		if snap.Error != "" {
-			snap.Error += "; "
-		}
-		snap.Error += "port scan: " + scanErr.Error()
-	}
-	s.mu.Lock()
-	s.scanProgress = "enriching services"
-	s.mu.Unlock()
-	ports = enrich.Results(ctx, ports, 800*time.Millisecond, 32)
-	s.mu.Lock()
-	s.scanProgress = "resolving hostnames"
-	s.mu.Unlock()
-	discover.EnrichHostnames(ctx, hosts, 400*time.Millisecond, 32, 1500*time.Millisecond)
-	s.mu.Lock()
-	s.scanProgress = "lan identity probes"
-	s.mu.Unlock()
-	discover.EnrichLANIdentity(ctx, hosts)
-	snap.Hosts = hosts
-	snap.Ports = ports
-	snap.Findings = risk.Evaluate(hosts, ports)
-	snap.FinishedAt = time.Now().UTC()
-	snap.DurationMs = snap.FinishedAt.Sub(snap.StartedAt).Milliseconds()
-
-	s.mu.Lock()
-	s.lastScan = snap
-	s.scanProgress = "done"
-	s.mu.Unlock()
-}
-
-func (s *Server) handleScanStatus(w http.ResponseWriter, r *http.Request) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	writeJSON(w, map[string]any{
-		"running":   s.scanRunning,
-		"progress":  s.scanProgress,
-		"hasResult": s.lastScan != nil,
-	})
 }
 
 func (s *Server) handleResults(w http.ResponseWriter, r *http.Request) {
