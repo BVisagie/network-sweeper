@@ -14,7 +14,8 @@ internal/scan          Findings-port TCP connect scan + service labels
 internal/enrich        Short HTTP title/Server, TLS cert summary, SSH/FTP/SMTP banners
 internal/risk          Heuristic findings from open ports / enrichment / host metadata
 internal/netinfo       Interfaces, CIDR helpers, allowlist, default gateway (best-effort)
-internal/oui           Offline MAC vendor prefix map
+internal/oui           Offline MAC vendor lookup: curated map, then embedded IEEE MA-L registry
+                       (ieee.csv, refreshed by `make oui` / internal/oui/gen)
 internal/platform      Elevation detection + capability snapshot for Limitations UI
 internal/update        Opt-in GitHub Releases check
 internal/version       Link-time version + public repo path for updates

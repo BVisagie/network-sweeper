@@ -11,7 +11,7 @@ Legend: **Available** = works with current privileges · **Needs elevation** = f
 - IPv4 interface + CIDR detection
 - TCP connect discovery (dedicated discovery port set)
 - TCP findings port scan + service labels
-- ARP **cache** MAC enrichment after contact + offline OUI vendor lookup
+- ARP **cache** MAC enrichment after contact + offline vendor lookup (curated names, then the full embedded IEEE MA-L registry)
 - ARP **cache** discovery: on-link hosts that answered the OS's ARP lookup during TCP discovery are listed as `arp-cache` even when every discovery port is closed (no elevation needed)
 - Private (randomised, locally administered) MAC badge when no vendor matches
 - Hostname resolution: reverse DNS, then NetBIOS (UDP/137), then mDNS reverse PTR; SSDP/SNMP may fill remaining empty names

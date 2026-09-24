@@ -9,6 +9,7 @@
 ## Cut a release
 
 1. Ensure `main` (or the release branch) is green: `make test` locally and CI on the PR.
+   Optionally refresh the MAC vendor registry first: `make oui`, then commit `internal/oui/ieee.csv`.
 2. Tag a semver release (leading `v` required for the workflow):
 
 ```bash
