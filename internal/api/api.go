@@ -16,9 +16,9 @@ import (
 
 	"github.com/BVisagie/network-sweeper/internal/discover"
 	"github.com/BVisagie/network-sweeper/internal/enrich"
+	"github.com/BVisagie/network-sweeper/internal/inventory"
 	"github.com/BVisagie/network-sweeper/internal/netinfo"
 	"github.com/BVisagie/network-sweeper/internal/platform"
-	"github.com/BVisagie/network-sweeper/internal/risk"
 	"github.com/BVisagie/network-sweeper/internal/scan"
 	"github.com/BVisagie/network-sweeper/internal/update"
 	"github.com/BVisagie/network-sweeper/internal/version"
@@ -33,6 +33,8 @@ type Server struct {
 	BaseURL    string
 	WebFS      fs.FS
 	Elevated   bool
+	// Store keeps history and annotations; New starts with a memory-only one.
+	Store *inventory.Store
 
 	mu           sync.Mutex
 	customOptIn  bool
@@ -43,26 +45,8 @@ type Server struct {
 	run          *scanRun // active or most recent run
 }
 
-// ScanSnapshot is the result of one finished run. Canceled and timed-out runs
-// keep what they observed, flagged Partial.
-type ScanSnapshot struct {
-	ID          string          `json:"id"`
-	State       string          `json:"state"`
-	Partial     bool            `json:"partial"`
-	Coverage    scanPlan        `json:"coverage"`
-	StartedAt   time.Time       `json:"startedAt"`
-	FinishedAt  time.Time       `json:"finishedAt"`
-	DurationMs  int64           `json:"durationMs"`
-	Targets     []string        `json:"targets"`
-	Deep        bool            `json:"deep"`
-	CustomRange bool            `json:"customRange"`
-	Hosts       []discover.Host `json:"hosts"`
-	Ports       []scan.Result   `json:"ports"`
-	Findings    []risk.Finding  `json:"findings"`
-	GatewayIP   string          `json:"gatewayIp,omitempty"`
-	Error       string          `json:"error,omitempty"`
-	Warning     string          `json:"warning"`
-}
+// ScanSnapshot is the result of one finished run.
+type ScanSnapshot = inventory.Snapshot
 
 // New creates a server with a fresh session token.
 func New(webFS fs.FS, elevated bool) *Server {
@@ -70,6 +54,7 @@ func New(webFS fs.FS, elevated bool) *Server {
 		Token:    newToken(),
 		WebFS:    webFS,
 		Elevated: elevated,
+		Store:    inventory.Memory(inventory.ModeEphemeral, "Running without saved history."),
 	}
 }
 
@@ -93,6 +78,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/export", s.withSecurity(s.handleExport))
 	mux.HandleFunc("/api/settings", s.withSecurity(s.handleSettings))
 	mux.HandleFunc("/api/update", s.withSecurity(s.handleUpdate))
+	mux.HandleFunc("GET /api/inventory", s.withSecurity(s.handleInventory))
+	mux.HandleFunc("GET /api/devices/{id}", s.withSecurity(s.handleDevice))
+	mux.HandleFunc("POST /api/devices/{id}", s.withSecurity(s.handleAnnotate))
+	mux.HandleFunc("POST /api/devices/{id}/review", s.withSecurity(s.handleReview))
+	mux.HandleFunc("GET /api/history", s.withSecurity(s.handleHistory))
+	mux.HandleFunc("POST /api/history/delete", s.withSecurity(s.handleDeleteHistory))
+	mux.HandleFunc("GET /api/changes", s.withSecurity(s.handleChanges))
+	mux.HandleFunc("POST /api/profiles/{id}", s.withSecurity(s.handleProfile))
 	mux.Handle("/", s.uiHandler())
 	return mux
 }
@@ -177,6 +170,7 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		"elevated":     s.Elevated,
 		"customOptIn":  s.customOptIn,
 		"updatesOptIn": s.updatesOptIn,
+		"storage":      s.Store.Status(),
 	})
 }
 
@@ -251,16 +245,43 @@ func (s *Server) handleResults(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.lastScan)
 }
 
+// handleExport downloads the current scan, a retained scan (?scan=ID), or the
+// device inventory with annotations (?what=inventory).
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	if q.Get("what") == "inventory" {
+		profileID := s.profileParam(r)
+		latest := s.latestScan(profileID)
+		var views []deviceView
+		for _, d := range s.Store.Devices(profileID) {
+			views = append(views, s.view(d, latest, true))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Disposition", "attachment; filename=network-sweeper-inventory.json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"exportVersion": inventory.SchemaVersion,
+			"profiles":      s.Store.Profiles(),
+			"profileId":     profileID,
+			"devices":       views,
+		})
+		return
+	}
 	s.mu.Lock()
 	snap := s.lastScan
 	s.mu.Unlock()
+	if id := q.Get("scan"); id != "" {
+		stored, err := s.Store.Snapshot(id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		snap = stored
+	}
 	if snap == nil {
 		http.Error(w, "no results", http.StatusNotFound)
 		return
 	}
-	format := r.URL.Query().Get("format")
-	if format == "csv" {
+	if q.Get("format") == "csv" {
 		w.Header().Set("Content-Type", "text/csv")
 		w.Header().Set("Content-Disposition", "attachment; filename=network-sweeper.csv")
 		_, _ = w.Write([]byte(exportCSV(snap)))
@@ -274,6 +295,7 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 type settingsRequest struct {
 	CustomOptIn  *bool `json:"customOptIn"`
 	UpdatesOptIn *bool `json:"updatesOptIn"`
+	Retention    *int  `json:"retention"`
 }
 
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
@@ -284,12 +306,19 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{
 			"customOptIn":  s.customOptIn,
 			"updatesOptIn": s.updatesOptIn,
+			"retention":    s.Store.Retention(),
 		})
 	case http.MethodPost:
 		var req settingsRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
+		}
+		if req.Retention != nil {
+			if err := s.Store.SetRetention(*req.Retention); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
 		}
 		s.mu.Lock()
 		if req.CustomOptIn != nil {
@@ -298,7 +327,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		if req.UpdatesOptIn != nil {
 			s.updatesOptIn = *req.UpdatesOptIn
 		}
-		out := map[string]any{"customOptIn": s.customOptIn, "updatesOptIn": s.updatesOptIn}
+		out := map[string]any{"customOptIn": s.customOptIn, "updatesOptIn": s.updatesOptIn, "retention": s.Store.Retention()}
 		s.mu.Unlock()
 		writeJSON(w, out)
 	default:

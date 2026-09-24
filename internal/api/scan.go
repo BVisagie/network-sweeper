@@ -15,6 +15,7 @@ import (
 
 	"github.com/BVisagie/network-sweeper/internal/discover"
 	"github.com/BVisagie/network-sweeper/internal/enrich"
+	"github.com/BVisagie/network-sweeper/internal/inventory"
 	"github.com/BVisagie/network-sweeper/internal/netinfo"
 	"github.com/BVisagie/network-sweeper/internal/oui"
 	"github.com/BVisagie/network-sweeper/internal/risk"
@@ -58,13 +59,7 @@ type scanRequest struct {
 // scanPlan is what a run will cover. Preview and scan build it the same way,
 // so the preview shows exactly what the scan does.
 type scanPlan struct {
-	Ranges    []string `json:"ranges"`
-	Skipped   []string `json:"skipped,omitempty"` // local subnets too large to include by default
-	Addresses int      `json:"addresses"`
-	Limit     int      `json:"limit"`
-	Methods   []string `json:"methods"`
-	Deep      bool     `json:"deep"`
-	Custom    bool     `json:"customRange"`
+	inventory.Coverage
 
 	targets       []*net.IPNet
 	deepRequested bool
@@ -89,6 +84,7 @@ type scanRun struct {
 	FinishedAt time.Time  `json:"finishedAt,omitzero"`
 	Partial    bool       `json:"partial"`
 	Error      string     `json:"error,omitempty"`
+	SaveError  string     `json:"saveError,omitempty"` // results are shown but were not saved
 	Plan       scanPlan   `json:"plan"`
 }
 
@@ -103,7 +99,7 @@ func (e *planError) Error() string { return e.msg }
 // planScan parses and sizes the requested targets. With no targets it uses the
 // local subnets that fit the limit on their own, listing the others as skipped.
 func (s *Server) planScan(req scanRequest, local []*net.IPNet) (*scanPlan, error) {
-	plan := &scanPlan{Limit: scanAddressLimit}
+	plan := &scanPlan{Coverage: inventory.Coverage{Limit: scanAddressLimit}}
 	var targets []*net.IPNet
 	if len(req.Targets) == 0 {
 		for _, n := range local {
@@ -338,7 +334,7 @@ func (s *Server) runScan(ctx context.Context, id string, plan *scanPlan) {
 	s.mu.Unlock()
 	snap := &ScanSnapshot{
 		ID:          id,
-		Coverage:    *plan,
+		Coverage:    plan.Coverage,
 		StartedAt:   startedAt,
 		Targets:     plan.Ranges,
 		Deep:        plan.Deep,
@@ -421,6 +417,8 @@ func (s *Server) runScan(ctx context.Context, id string, plan *scanPlan) {
 	snap.FinishedAt = time.Now().UTC()
 	snap.DurationMs = snap.FinishedAt.Sub(snap.StartedAt).Milliseconds()
 
+	snap.GatewayMAC, snap.GatewaySubnet = gatewayIdentity(gateway, hosts)
+
 	switch {
 	case errors.Is(ctx.Err(), context.Canceled):
 		snap.State = stateCanceled
@@ -437,12 +435,20 @@ func (s *Server) runScan(ctx context.Context, id string, plan *scanPlan) {
 		snap.State = stateCompleted
 	}
 
+	s.progress(id, phaseSaving, 0, 0)
+	// Record links hosts to devices even when the write fails; the scan stays
+	// visible and exportable either way.
+	saveErr := s.Store.Record(snap)
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.run == nil || s.run.ID != id {
 		return
 	}
 	s.lastScan = snap
+	if saveErr != nil {
+		s.run.SaveError = saveErr.Error()
+	}
 	s.run.State = snap.State
 	s.run.Phase = phaseDone
 	s.run.Partial = snap.Partial
@@ -465,6 +471,32 @@ func (s *Server) handleScanStatus(w http.ResponseWriter, r *http.Request) {
 		out["progress"] = progressText(run)
 	}
 	writeJSON(w, out)
+}
+
+// gatewayIdentity returns the gateway's MAC (from the scan, else the OS ARP
+// cache) and the local subnet holding it: together they name the network.
+func gatewayIdentity(gateway string, hosts []discover.Host) (mac, subnet string) {
+	if gateway == "" {
+		return "", ""
+	}
+	for _, h := range hosts {
+		if h.IP == gateway {
+			mac = h.MAC
+		}
+	}
+	if mac == "" {
+		mac = discover.ReadARPTable()[gateway]
+	}
+	gw := net.ParseIP(gateway)
+	if locals, err := netinfo.LocalSubnets(); err == nil {
+		for _, n := range locals {
+			if n.Contains(gw) {
+				subnet = n.String()
+				break
+			}
+		}
+	}
+	return mac, subnet
 }
 
 // progressText keeps the legacy one-line status for older clients.

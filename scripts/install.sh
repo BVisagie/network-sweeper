@@ -18,6 +18,7 @@ PREFIX=""
 NO_BROWSER=0
 SKIP_MENU=0
 WANT_SUDO=0      # 1 = --sudo or menu “run once with sudo”
+BIN_ARGS=()      # extra app flags; the ephemeral run keeps no history (--ephemeral)
 WORKDIR=""
 
 # UI palette matches web/style.css (--accent #3ecf8e, --fg #e7f2ec, --muted, --danger).
@@ -430,14 +431,14 @@ run_sudo() {
 	note_no_browser
 	if [[ "$do_exec" -eq 1 ]]; then
 		if want_no_browser; then
-			exec sudo --preserve-env=DISPLAY,WAYLAND_DISPLAY,XDG_RUNTIME_DIR -- "$bin" -no-browser || die "Failed to launch ${bin}"
+			exec sudo --preserve-env=DISPLAY,WAYLAND_DISPLAY,XDG_RUNTIME_DIR -- "$bin" ${BIN_ARGS[@]+"${BIN_ARGS[@]}"} -no-browser || die "Failed to launch ${bin}"
 		fi
-		exec sudo --preserve-env=DISPLAY,WAYLAND_DISPLAY,XDG_RUNTIME_DIR -- "$bin" || die "Failed to launch ${bin}"
+		exec sudo --preserve-env=DISPLAY,WAYLAND_DISPLAY,XDG_RUNTIME_DIR -- "$bin" ${BIN_ARGS[@]+"${BIN_ARGS[@]}"} || die "Failed to launch ${bin}"
 	fi
 	if want_no_browser; then
-		sudo --preserve-env=DISPLAY,WAYLAND_DISPLAY,XDG_RUNTIME_DIR -- "$bin" -no-browser
+		sudo --preserve-env=DISPLAY,WAYLAND_DISPLAY,XDG_RUNTIME_DIR -- "$bin" ${BIN_ARGS[@]+"${BIN_ARGS[@]}"} -no-browser
 	else
-		sudo --preserve-env=DISPLAY,WAYLAND_DISPLAY,XDG_RUNTIME_DIR -- "$bin"
+		sudo --preserve-env=DISPLAY,WAYLAND_DISPLAY,XDG_RUNTIME_DIR -- "$bin" ${BIN_ARGS[@]+"${BIN_ARGS[@]}"}
 	fi
 }
 
@@ -445,9 +446,9 @@ run_binary() {
 	local bin=$1
 	note_no_browser
 	if want_no_browser; then
-		"$bin" -no-browser
+		"$bin" ${BIN_ARGS[@]+"${BIN_ARGS[@]}"} -no-browser
 	else
-		"$bin"
+		"$bin" ${BIN_ARGS[@]+"${BIN_ARGS[@]}"}
 	fi
 }
 
@@ -468,9 +469,9 @@ launch_binary() {
 	if [[ "$do_exec" -eq 1 ]]; then
 		note_no_browser
 		if want_no_browser; then
-			exec "$bin" -no-browser || die "Failed to launch ${bin}"
+			exec "$bin" ${BIN_ARGS[@]+"${BIN_ARGS[@]}"} -no-browser || die "Failed to launch ${bin}"
 		fi
-		exec "$bin" || die "Failed to launch ${bin}"
+		exec "$bin" ${BIN_ARGS[@]+"${BIN_ARGS[@]}"} || die "Failed to launch ${bin}"
 	fi
 	run_binary "$bin"
 }
@@ -520,7 +521,13 @@ main() {
 	verified=$(download_and_verify "$WORKDIR")
 
 	if [[ "$MODE" == ephemeral ]]; then
-		ok "Running once from a temp directory (not installed)."
+		ok "Running once from a temp directory (not installed; scan history is not saved)."
+		# Releases before saved history do not know the flag (and need none).
+		local usage
+		usage=$("$verified" -h 2>&1 || true)
+		if [[ "$usage" == *-ephemeral* ]]; then
+			BIN_ARGS=(-ephemeral)
+		fi
 		launch_binary "$verified" 0
 		return
 	fi

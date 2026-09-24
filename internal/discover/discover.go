@@ -33,6 +33,8 @@ type Host struct {
 	// DuplicateMACs lists every MAC that answered ARP for this IP when more
 	// than one did (active ARP sweep only).
 	DuplicateMACs []string `json:"duplicateMacs,omitempty"`
+	// DeviceID links the host to its inventory device, once recorded.
+	DeviceID string `json:"deviceId,omitempty"`
 }
 
 // Options controls discovery behavior.
