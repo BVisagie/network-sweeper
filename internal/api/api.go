@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/BVisagie/network-sweeper/internal/discover"
 	"github.com/BVisagie/network-sweeper/internal/enrich"
@@ -309,7 +310,7 @@ func (s *Server) runScan(ctx context.Context, targets []*net.IPNet, deep, custom
 		Deep:        deep && s.Elevated,
 		CustomRange: custom,
 		GatewayIP:   gateway,
-		Warning:     "In unprivileged mode, a host that does not accept connections on any discovery port will not appear at all.",
+		Warning:     "In unprivileged mode, a host that does not accept connections on any discovery port appears only if it answered the OS's ARP lookup (arp-cache); hosts off the local segment will not appear at all.",
 	}
 	for _, t := range targets {
 		snap.Targets = append(snap.Targets, t.String())
@@ -321,7 +322,7 @@ func (s *Server) runScan(ctx context.Context, targets []*net.IPNet, deep, custom
 		if useARP {
 			snap.Warning += "/ARP"
 		}
-		snap.Warning += ") will not appear at all."
+		snap.Warning += ") and is not in the OS ARP cache will not appear at all."
 	}
 	if deep && !s.Elevated {
 		if runtime.GOOS == "windows" {
@@ -359,6 +360,7 @@ func (s *Server) runScan(ctx context.Context, targets []*net.IPNet, deep, custom
 	for i := range hosts {
 		if hosts[i].MAC != "" {
 			hosts[i].Vendor = oui.Lookup(hosts[i].MAC)
+			hosts[i].PrivateMAC = hosts[i].Vendor == "" && oui.LocallyAdministered(hosts[i].MAC)
 		}
 		if selfIPs[hosts[i].IP] {
 			hosts[i].IsSelf = true
@@ -510,7 +512,7 @@ func writeJSON(w http.ResponseWriter, v any) {
 
 func exportCSV(snap *ScanSnapshot) string {
 	var b strings.Builder
-	b.WriteString("ip,mac,vendor,hostname,identity_hint,alive_via,open_ports,http_titles,tls_names,banners,finding_count,is_self,is_gateway\n")
+	b.WriteString("ip,mac,vendor,hostname,identity_hint,alive_via,open_ports,http_titles,tls_names,banners,finding_count,is_self,is_gateway,private_mac,duplicate_macs\n")
 	portsByIP := map[string][]scan.OpenPort{}
 	findCount := map[string]int{}
 	for _, p := range snap.Ports {
@@ -548,6 +550,8 @@ func exportCSV(snap *ScanSnapshot) string {
 			fmt.Sprintf("%d", findCount[h.IP]),
 			fmt.Sprintf("%t", h.IsSelf),
 			fmt.Sprintf("%t", h.IsGateway),
+			fmt.Sprintf("%t", h.PrivateMAC),
+			csvField(strings.Join(h.DuplicateMACs, ";")),
 		}
 		b.WriteString(strings.Join(row, ","))
 		b.WriteByte('\n')
@@ -555,8 +559,24 @@ func exportCSV(snap *ScanSnapshot) string {
 	return b.String()
 }
 
+// csvField quotes s for CSV. Most cells hold text a device chose (names,
+// titles, banners), so control characters become spaces, bidi overrides are
+// dropped, and a leading = + - @ is prefixed with ' so a spreadsheet shows it
+// as text instead of running it as a formula.
 func csvField(s string) string {
-	if strings.ContainsAny(s, ",\"\n\r") {
+	s = strings.Map(func(r rune) rune {
+		switch {
+		case r >= 0x202A && r <= 0x202E, r >= 0x2066 && r <= 0x2069, r == 0x200E, r == 0x200F:
+			return -1
+		case unicode.IsControl(r):
+			return ' '
+		}
+		return r
+	}, s)
+	if s != "" && strings.ContainsRune("=+-@", rune(s[0])) {
+		s = "'" + s
+	}
+	if strings.ContainsAny(s, ",\"") {
 		return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
 	}
 	return s

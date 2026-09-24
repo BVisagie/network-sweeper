@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 )
 
@@ -44,6 +45,10 @@ func readARPLinux() map[string]string {
 		}
 		ip := fields[0]
 		mac := fields[3]
+		// Flags 0x2 (ATF_COM) means the entry is complete: the MAC is known.
+		if flags, err := strconv.ParseUint(fields[2], 0, 32); err != nil || flags&0x2 == 0 {
+			continue
+		}
 		if mac == "00:00:00:00:00:00" || mac == "<incomplete>" {
 			continue
 		}
@@ -106,4 +111,22 @@ func looksLikeMAC(s string) bool {
 		}
 	}
 	return true
+}
+
+// unicastMAC reports whether mac is a usable unicast hardware address: not
+// broadcast, not multicast (01:00:5e…, 33:33…), and not all zeros.
+func unicastMAC(mac string) bool {
+	hw, err := net.ParseMAC(mac)
+	if err != nil || len(hw) != 6 {
+		return false
+	}
+	if hw[0]&0x01 != 0 {
+		return false
+	}
+	for _, b := range hw {
+		if b != 0 {
+			return true
+		}
+	}
+	return false
 }

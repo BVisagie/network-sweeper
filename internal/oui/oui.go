@@ -1,6 +1,9 @@
 package oui
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // Compact built-in OUI prefix map (normalized uppercase, no separators).
 // Not exhaustive — enough for common vendors in a home/lab LAN.
@@ -233,6 +236,21 @@ func Lookup(mac string) string {
 		return v
 	}
 	return ""
+}
+
+// LocallyAdministered reports whether the MAC has the U/L bit (0x02 of the
+// first octet) set: software assigned it, so no IEEE vendor owns it. Phones'
+// private Wi-Fi addresses, VMs and containers use these.
+func LocallyAdministered(mac string) bool {
+	n := normalize(mac)
+	if len(n) < 2 {
+		return false
+	}
+	var first byte
+	if _, err := fmt.Sscanf(n[:2], "%02X", &first); err != nil {
+		return false
+	}
+	return first&0x02 != 0
 }
 
 func normalize(mac string) string {

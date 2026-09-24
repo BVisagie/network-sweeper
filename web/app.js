@@ -45,6 +45,8 @@
       "Found with a ping (ICMP). The device answered even if it keeps most ports closed — useful for quiet phones, TVs, and IoT.",
     arp:
       "Found with ARP on your local network (“who has this IP?”). Catches devices that ignore ping and don’t open common ports. Needs Deep discovery + elevation on Linux/macOS.",
+    "arp-cache":
+      "Found in your computer’s own ARP cache: the device answered “who has this IP?” when we tried to connect, even though every discovery port was closed. No elevation needed. A device that just left the network can linger here for a minute.",
   };
 
   function tipAttr(text) {
@@ -724,6 +726,20 @@
             )}">Router?</span>`
           );
         }
+        if (h.duplicateMacs && h.duplicateMacs.length > 1) {
+          badges.push(
+            `<span class="tag-pill dup" tabindex="0" data-tip="${tipAttr(
+              `Duplicate IP: ${h.duplicateMacs.length} devices answered for this address (${h.duplicateMacs.join(", ")}). Usually a static address that clashes with a DHCP lease; occasionally a Wi‑Fi extender answering for its clients.`
+            )}">Duplicate IP</span>`
+          );
+        }
+        if (h.privateMac) {
+          badges.push(
+            `<span class="tag-pill priv" tabindex="0" data-tip="${tipAttr(
+              "Private (randomised) MAC: software picked this address, so no maker can be looked up. Phones and laptops do this on Wi‑Fi for privacy; VMs and containers do it too."
+            )}">Private MAC</span>`
+          );
+        }
         if (sev.critical) {
           badges.push(
             `<button type="button" class="tag-pill risk critical" data-open-risks="${escapeHtml(h.ip)}" data-tip="${tipAttr(
@@ -770,7 +786,15 @@
           : `<div class="name-primary name-empty" tabindex="0" data-tip="${nameTip}">Unknown</div>`;
         const macLabel = h.mac || "No MAC yet";
         const macTip = h.mac
-          ? tipAttr(`Hardware (MAC) address ${h.mac}.${vendor ? ` Vendor lookup: ${vendor}.` : " No vendor match in the offline OUI map."}`)
+          ? tipAttr(
+              `Hardware (MAC) address ${h.mac}.${
+                vendor
+                  ? ` Vendor lookup: ${vendor}.`
+                  : h.privateMac
+                    ? " Private (randomised) address, so there is no vendor to look up."
+                    : " No vendor match in the offline OUI map."
+              }`
+            )
           : tipAttr(
               "No MAC address in the ARP cache yet. MACs appear after the OS talks to the host on this LAN; some adapters or isolation modes never show one."
             );

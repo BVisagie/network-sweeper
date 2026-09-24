@@ -25,7 +25,7 @@ web/                   Embedded UI (index.html, style.css, app.js) via embed.FS
 
 1. `POST /api/scan` validates targets against local subnets (or custom opt-in).
 2. `discover.Engine.Discover` probes discovery ports; ICMP via system `ping` when Windows boost applies or Deep+elevated on Unix; active ARP who-has when Deep+elevated on Linux/macOS.
-3. MAC from ARP cache (and ARP replies) + OUI; hosts tagged as self / gateway (or soft router guess) when known.
+3. On-link hosts in the OS ARP cache (resolved during the TCP dials) that no probe found are added as `arp-cache`; MAC from ARP cache (and ARP replies) + OUI; reverse DNS runs concurrently; hosts tagged as self / gateway (or soft router guess), private MAC (U/L bit, no vendor) and duplicate IP (several ARP replies) when known.
 4. `scan.ScanHosts` probes findings ports on live hosts.
 5. `enrich.Results` adds lightweight HTTP/TLS/banner hints on relevant open ports.
 6. `discover.EnrichHostnames` fills empty names via NetBIOS then mDNS.
@@ -50,4 +50,4 @@ Overview host rows use shared float tips (`data-tip`) for beginner-friendly help
 
 ## Deep discovery honesty
 
-**Deep discovery** means **ICMP via system `ping`**, and on **elevated Linux/macOS** also an **active ARP sweep**. On Windows, ICMP is attempted as a best-effort boost even without elevation (and even when Deep is unchecked); active ARP remains deferred. ARP **cache** enrichment still runs after contact on all OSes.
+**Deep discovery** means **ICMP via system `ping`**, and on **elevated Linux/macOS** also an **active ARP sweep**. On Windows, ICMP is attempted as a best-effort boost even without elevation (and even when Deep is unchecked); active ARP remains deferred. ARP **cache** enrichment and `arp-cache` host discovery still run after contact on all OSes, unprivileged.

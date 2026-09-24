@@ -24,7 +24,7 @@ No Node install is required. End-user release binaries do not need Go at all.
 - Prefer **stdlib-only** Go. New module dependencies need a clear maintainer decision.
 - UI is vanilla HTML/CSS/JS under `web/` — no Node toolchain.
 - **Security invariants:** bind `127.0.0.1` only; keep session token + Origin checks; default targets = local CIDRs; custom ranges need explicit opt-in.
-- Discovery honesty: Deep = ICMP, plus active ARP on elevated Linux/macOS (Windows ARP stays deferred). ARP cache enrichment runs on all OSes. Never mark unimplemented capabilities as `full` when elevated.
+- Discovery honesty: Deep = ICMP, plus active ARP on elevated Linux/macOS (Windows ARP stays deferred). ARP cache enrichment and `arp-cache` discovery (hosts the OS resolved during TCP dials) run on all OSes without elevation. Never mark unimplemented capabilities as `full` when elevated.
 - When capabilities change, update together: `docs/PLATFORM.md`, `docs/ARCHITECTURE.md`, the README hub, OS runbooks (`docs/linux.md` / `windows.md` / `macos.md`), Limitations UI / `internal/platform.Snapshot`, and elevation how-tos.
 - Keep diffs focused; match existing style.
 - License: GNU GPL v3 (`LICENSE`); copyright in `NOTICE`.

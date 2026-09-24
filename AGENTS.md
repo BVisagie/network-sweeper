@@ -18,9 +18,9 @@ Local LAN inventory + heuristic exposure findings with an embedded localhost web
 
 - Discovery ports ≠ findings ports (coverage vs risk labeling).
 - **Deep discovery** = **ICMP** via system `ping`, plus **active ARP** on elevated Linux/macOS. On Windows: ping may run as a boost without elevation (and without Deep); active ARP is deferred.
-- ARP **cache** enrichment runs on all OSes after contact. Active ARP sweep is Unix Deep+elevated only.
+- ARP **cache** enrichment runs on all OSes after contact, and on-link hosts found only in the ARP cache are listed as `arp-cache` (unprivileged). Active ARP sweep is Unix Deep+elevated only.
 - Never mark unimplemented capabilities as `full` when the process is elevated (Windows ARP stays `deferred`).
-- Silent/firewalled hosts that miss discovery ports (and ICMP/ARP when those paths are off/unavailable) may be invisible entirely.
+- Silent hosts that miss discovery ports and are not in the ARP cache (off-segment, isolated, or ignoring ARP), and ICMP/ARP paths are off/unavailable, may be invisible entirely.
 
 ## Stack
 

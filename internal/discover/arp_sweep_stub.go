@@ -10,6 +10,6 @@ import (
 
 func arpSweepSupported() bool { return false }
 
-func sweepARP(context.Context, []*net.IPNet, time.Duration) map[string]string {
-	return map[string]string{}
+func sweepARP(context.Context, []*net.IPNet, time.Duration) map[string][]string {
+	return map[string][]string{}
 }

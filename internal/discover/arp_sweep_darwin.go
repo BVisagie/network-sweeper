@@ -29,8 +29,8 @@ const (
 
 const ifnamsiz = 16
 
-func sweepARP(ctx context.Context, targets []*net.IPNet, timeout time.Duration) map[string]string {
-	out := map[string]string{}
+func sweepARP(ctx context.Context, targets []*net.IPNet, timeout time.Duration) map[string][]string {
+	out := map[string][]string{}
 	ifaces, err := net.Interfaces()
 	if err != nil {
 		return out
@@ -70,16 +70,18 @@ func sweepARP(ctx context.Context, targets []*net.IPNet, timeout time.Duration) 
 			if len(probe) == 0 {
 				continue
 			}
-			for ip, mac := range arpSweepIfaceDarwin(ctx, iface, localIP, probe, timeout) {
-				out[ip] = mac
+			for ip, macs := range arpSweepIfaceDarwin(ctx, iface, localIP, probe, timeout) {
+				for _, mac := range macs {
+					addReply(out, ip, mac)
+				}
 			}
 		}
 	}
 	return out
 }
 
-func arpSweepIfaceDarwin(ctx context.Context, iface net.Interface, srcIP net.IP, dsts []net.IP, timeout time.Duration) map[string]string {
-	out := map[string]string{}
+func arpSweepIfaceDarwin(ctx context.Context, iface net.Interface, srcIP net.IP, dsts []net.IP, timeout time.Duration) map[string][]string {
+	out := map[string][]string{}
 	f, err := openBPF()
 	if err != nil {
 		return out
@@ -109,7 +111,9 @@ func arpSweepIfaceDarwin(ctx context.Context, iface net.Interface, srcIP net.IP,
 		deadline = dl
 	}
 	buf := make([]byte, 4096)
-	for len(want) > 0 && time.Now().Before(deadline) {
+	// Listen until the deadline, not just until every target answered once:
+	// a second device answering for the same IP is how a duplicate shows up.
+	for time.Now().Before(deadline) {
 		if ctx.Err() != nil {
 			break
 		}
@@ -124,8 +128,7 @@ func arpSweepIfaceDarwin(ctx context.Context, iface net.Interface, srcIP net.IP,
 			if off+14 <= n && binary.BigEndian.Uint16(buf[off+12:off+14]) == 0x0806 {
 				ip, mac, ok := parseARPReplyAnyDarwin(buf[off:n])
 				if ok && want[ip] {
-					out[ip] = mac
-					delete(want, ip)
+					addReply(out, ip, mac)
 				}
 				break
 			}

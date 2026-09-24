@@ -12,6 +12,8 @@ Legend: **Available** = works with current privileges · **Needs elevation** = f
 - TCP connect discovery (dedicated discovery port set)
 - TCP findings port scan + service labels
 - ARP **cache** MAC enrichment after contact + offline OUI vendor lookup
+- ARP **cache** discovery: on-link hosts that answered the OS's ARP lookup during TCP discovery are listed as `arp-cache` even when every discovery port is closed (no elevation needed)
+- Private (randomised, locally administered) MAC badge when no vendor matches
 - Hostname resolution: reverse DNS, then NetBIOS (UDP/137), then mDNS reverse PTR; SSDP/SNMP may fill remaining empty names
 - Service enrichment on open findings ports: HTTP title/`Server`, TLS cert summary (CN/issuer/expiry/self-signed), SSH/FTP/SMTP banners
 - SSDP/UPnP inventory hints (known hosts only) + SNMP soft `public` probe (educational findings)
@@ -21,7 +23,7 @@ Legend: **Available** = works with current privileges · **Needs elevation** = f
 ### Elevated / partial
 
 - **ICMP ping discovery (Deep discovery)** — On **Windows**, system `ping` is attempted as an extra discovery signal even without elevation (and even when Deep is unchecked). On **Linux/macOS**, ICMP runs only when Deep is enabled **and** the process is elevated (`sudo`). Unprivileged mode always tries TCP discovery ports first.
-- **Active ARP sweep** — On **Linux/macOS**, Deep + elevation also sends ARP who-has on local interfaces to find quiet hosts. On **Windows**, active ARP remains deferred (no Npcap-class dependency); Deep uses ICMP only.
+- **Active ARP sweep** — On **Linux/macOS**, Deep + elevation also sends ARP who-has on local interfaces to find quiet hosts, and flags **Duplicate IP** when more than one MAC answers for an address. On **Windows**, active ARP remains deferred (no Npcap-class dependency); Deep uses ICMP only.
 - **Hostname resolution** — partial everywhere; reverse DNS + NetBIOS + mDNS (+ SSDP/SNMP fill). Many IoT devices still advertise little.
 - **Device identification** — partial; port labels + OUI + hostname hints + HTTP/TLS/banner + SSDP/SNMP (not OS fingerprinting).
 
@@ -36,7 +38,7 @@ Legend: **Available** = works with current privileges · **Needs elevation** = f
 
 ## Discovery incompleteness (important)
 
-A host that does not accept connections on any **discovery** port will **not appear at all** unless ICMP (and on elevated Linux/macOS, ARP) finds it — not merely with missing MAC/vendor. Locked-down IoT/media devices are often invisible until Deep discovery succeeds (**Deep** + elevation on Linux/macOS; Windows often already tries ping).
+A host that does not accept connections on any **discovery** port can still appear via the OS **ARP cache** (`arp-cache`): every TCP dial makes the OS resolve the target's MAC first, so on-link hosts that answer ARP are listed without elevation. Hosts off the local segment (routed custom CIDRs), behind client isolation, or that ignore ARP too will **not appear at all** unless ICMP finds them. A device that just left the network can linger in the ARP cache for a minute or so.
 
 Discovery ports (coverage-oriented) are separate from findings ports (risk/service labeling).
 
@@ -79,7 +81,7 @@ Short version: run the matching release binary; a browser is required; Go is not
 
 ## UI notes
 
-The Overview host table includes hover tips for Found via (`tcp/N`, `icmp`, `arp`), open ports, names/vendor, MAC, and device badges. Prefer keeping that copy educational and short when changing discovery semantics.
+The Overview host table includes hover tips for Found via (`tcp/N`, `icmp`, `arp`, `arp-cache`), open ports, names/vendor, MAC, and device badges. Prefer keeping that copy educational and short when changing discovery semantics.
 
 ## Code signing (v1 decision)
 

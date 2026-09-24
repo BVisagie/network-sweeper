@@ -26,6 +26,12 @@ type Host struct {
 	UPnPFriendlyName  string    `json:"upnpFriendlyName,omitempty"`
 	SNMPPublic        bool      `json:"snmpPublic,omitempty"`
 	SNMPSysDescr      string    `json:"snmpSysDescr,omitempty"`
+	// PrivateMAC is set when the MAC is locally administered (U/L bit) and no
+	// vendor is known: typically a phone's private Wi-Fi address.
+	PrivateMAC bool `json:"privateMac,omitempty"`
+	// DuplicateMACs lists every MAC that answered ARP for this IP when more
+	// than one did (active ARP sweep only).
+	DuplicateMACs []string `json:"duplicateMacs,omitempty"`
 }
 
 // Options controls discovery behavior.
@@ -173,37 +179,62 @@ func (e *Engine) Discover(ctx context.Context, opt Options) (Result, error) {
 		if arpTimeout < time.Second {
 			arpTimeout = 1500 * time.Millisecond
 		}
-		for ip, mac := range SweepARP(ctx, opt.Targets, arpTimeout) {
+		for ip, macs := range SweepARP(ctx, opt.Targets, arpTimeout) {
 			if ctx.Err() != nil {
 				break
 			}
+			var dups []string
+			if len(macs) > 1 {
+				dups = macs
+			}
 			if h, ok := alive[ip]; ok {
 				if h.MAC == "" {
-					h.MAC = mac
+					h.MAC = macs[0]
 				}
+				h.DuplicateMACs = dups
 				h.AliveVia = appendUnique(h.AliveVia, "arp")
 				continue
 			}
 			alive[ip] = &Host{
-				IP:       ip,
-				MAC:      mac,
-				AliveVia: []string{"arp"},
-				LastSeen: time.Now(),
+				IP:            ip,
+				MAC:           macs[0],
+				DuplicateMACs: dups,
+				AliveVia:      []string{"arp"},
+				LastSeen:      time.Now(),
 			}
 		}
 	}
 
-	out := make([]Host, 0, len(alive))
+	// Every TCP dial above made the OS resolve the target's MAC first, so the
+	// ARP cache now also holds on-link hosts that closed every discovery port.
+	// Promote those to live hosts: no elevation needed on any OS.
+	enumerated := make(map[string]bool, len(ips))
+	for _, ip := range ips {
+		enumerated[ip.String()] = true
+	}
 	arpTable := ReadARPTable()
+	for ip, mac := range arpTable {
+		if _, ok := alive[ip]; ok || !enumerated[ip] || !unicastMAC(mac) {
+			continue
+		}
+		alive[ip] = &Host{
+			IP:       ip,
+			MAC:      mac,
+			AliveVia: []string{"arp-cache"},
+			LastSeen: time.Now(),
+		}
+	}
+
+	out := make([]Host, 0, len(alive))
 	for _, h := range alive {
 		if h.MAC == "" {
 			if mac, ok := arpTable[h.IP]; ok {
 				h.MAC = mac
 			}
 		}
-		h.Hostname = reverseDNS(ctx, h.IP)
 		out = append(out, *h)
 	}
+	resolveNames(ctx, out, opt.Concurrency)
 	sort.Slice(out, func(i, j int) bool {
 		return ipLess(out[i].IP, out[j].IP)
 	})
@@ -227,6 +258,28 @@ func ipLess(a, b string) bool {
 		}
 	}
 	return false
+}
+
+// resolveNames fills Hostname by reverse DNS for every host, at most
+// concurrency lookups at a time.
+func resolveNames(ctx context.Context, hosts []Host, concurrency int) {
+	sem := make(chan struct{}, concurrency)
+	var wg sync.WaitGroup
+	for i := range hosts {
+		select {
+		case <-ctx.Done():
+			wg.Wait()
+			return
+		case sem <- struct{}{}:
+		}
+		wg.Add(1)
+		go func(h *Host) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			h.Hostname = reverseDNS(ctx, h.IP)
+		}(&hosts[i])
+	}
+	wg.Wait()
 }
 
 func reverseDNS(ctx context.Context, ip string) string {

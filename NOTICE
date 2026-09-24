@@ -7,3 +7,6 @@ the Free Software Foundation, either version 3 of the License, or
 (at your option) any later version.
 
 See the file LICENSE for the full text of the GNU General Public License.
+
+Release binaries include the Go standard library and runtime, (C) The Go
+Authors, under a BSD-style licence: https://go.dev/LICENSE

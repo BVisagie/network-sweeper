@@ -1276,6 +1276,8 @@ button.tag-pill {
 .tag-pill.self { color: var(--accent); border-color: rgba(62, 207, 142, 0.35); }
 .tag-pill.gw { color: #a8d4ff; border-color: rgba(168, 212, 255, 0.35); }
 .tag-pill.guess { color: #ffe29a; border-color: rgba(255, 226, 154, 0.3); }
+.tag-pill.priv { color: #d4b8ff; border-color: rgba(212, 184, 255, 0.3); }
+.tag-pill.dup { color: #ffb2ab; border-color: rgba(255, 178, 171, 0.35); }
 .tag-pill.risk.critical { color: #ffb2ab; }
 .tag-pill.risk.high { color: #ffc29a; }
 
