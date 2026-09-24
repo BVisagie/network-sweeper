@@ -2,6 +2,7 @@ package discover
 
 import (
 	"bufio"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -25,13 +26,18 @@ func ReadARPTable() map[string]string {
 }
 
 func readARPLinux() map[string]string {
-	out := map[string]string{}
 	f, err := os.Open("/proc/net/arp")
 	if err != nil {
-		return out
+		return map[string]string{}
 	}
 	defer f.Close()
-	sc := bufio.NewScanner(f)
+	return parseProcARP(f)
+}
+
+// parseProcARP reads /proc/net/arp content, keeping only complete entries.
+func parseProcARP(r io.Reader) map[string]string {
+	out := map[string]string{}
+	sc := bufio.NewScanner(r)
 	first := true
 	for sc.Scan() {
 		line := sc.Text()

@@ -11,7 +11,7 @@ For a **prebuilt release binary** you do **not** need Go, Node, Docker, nmap, or
 | `network-sweeper-windows-amd64.exe` | Yes | From [GitHub Releases](https://github.com/BVisagie/network-sweeper/releases) |
 | Web browser | Yes | Chrome, Edge, Firefox, etc. Opened automatically on start |
 | `ping` | Recommended | Used as a discovery boost (often without Admin). Comes with Windows |
-| `arp` | Optional | Used to read the OS ARP cache for MAC addresses |
+| `arp` | Optional | Used to read the OS ARP cache for MAC addresses and quiet on-link hosts (`arp-cache`) |
 | Administrator | Optional | Quieter devices; Deep checkbox is optional on Windows. Active ARP sweep is **not** available. Normal TCP scans work without elevation |
 
 There is no `curl \| bash` installer on Windows. Download the `.exe` from Releases.
@@ -63,6 +63,8 @@ TCP discovery and findings scans work without elevation. Full matrix: [PLATFORM.
 | Deep discovery seems ignored | Ping may already run without Admin; active ARP is deferred — check the Elevated badge and Limitations tab |
 | Missing names / “Unknown” | Names fill from reverse DNS, NetBIOS, mDNS, then SSDP/SNMP hints — many IoT devices still advertise little |
 | No MAC yet | ARP cache not populated yet, or Wi‑Fi client isolation / VPN path hides L2 |
+| Found via `arp-cache`, no open ports | The device answered your computer's ARP lookup but closed every discovery port. It is on your network; a device that just left can linger for a minute |
+| No vendor, **Private MAC** badge | The device uses a randomised (locally administered) MAC, as phones do on Wi‑Fi. No maker can be looked up for it |
 | Update check fails | Enable opt-in in Settings; needs public GitHub Releases; offline networks cannot check |
 
 ## Developers

@@ -113,6 +113,26 @@ func TestCSVEscape(t *testing.T) {
 	}
 }
 
+// Names, titles and banners come from devices on the network, so an export
+// must never hand a spreadsheet a formula or hidden text-direction tricks.
+func TestCSVFieldNeutralisesDeviceText(t *testing.T) {
+	for in, want := range map[string]string{
+		"=HYPERLINK(\"http://x\")": `"'=HYPERLINK(""http://x"")"`,
+		"+1+1":                     "'+1+1",
+		"-2+3":                     "'-2+3",
+		"@SUM(A1)":                 "'@SUM(A1)",
+		"\t=1+1":                   " =1+1",
+		"evil\u202Etxt.exe":        "eviltxt.exe",
+		"line1\nline2":             "line1 line2",
+		"Acme, Inc.":               `"Acme, Inc."`,
+		"plain":                    "plain",
+	} {
+		if got := csvField(in); got != want {
+			t.Errorf("csvField(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestIndexInjectsToken(t *testing.T) {
 	s := New(testFS(), false)
 	s.BaseURL = "http://127.0.0.1:12345"

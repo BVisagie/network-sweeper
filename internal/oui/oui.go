@@ -28,7 +28,7 @@ func ieeeTable() map[string]string {
 		ieee = make(map[string]string, 41000)
 		sc := bufio.NewScanner(bytes.NewReader(ieeeCSV))
 		for sc.Scan() {
-			line := sc.Text()
+			line := strings.TrimRight(sc.Text(), "\r") // CRLF on Windows checkouts
 			if len(line) < 8 || line[0] == '#' || line[6] != ',' {
 				continue
 			}

@@ -353,7 +353,7 @@
     } else if (os === "windows") {
       deepHint.innerHTML = `Ping may still work without Admin. Prefer <button type="button" class="text-link" id="priv-help-link">${escapeHtml(how.short)}</button> for quieter devices.`;
     } else {
-      deepHint.innerHTML = `Quiet devices may stay hidden. <button type="button" class="text-link" id="priv-help-link">${escapeHtml(how.short)}</button>`;
+      deepHint.innerHTML = `Some quiet devices may stay hidden. <button type="button" class="text-link" id="priv-help-link">${escapeHtml(how.short)}</button>`;
     }
     const helpLink = $("priv-help-link");
     if (helpLink) {
