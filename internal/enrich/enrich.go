@@ -16,13 +16,21 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/BVisagie/network-sweeper/internal/netinfo"
 	"github.com/BVisagie/network-sweeper/internal/scan"
 )
 
 var (
 	httpPorts   = map[int]bool{80: true, 8000: true, 8080: true, 5000: true, 8888: true, 9200: true}
 	httpsPorts  = map[int]bool{443: true, 8443: true, 993: true, 995: true, 2376: true}
-	bannerPorts = map[int]bool{21: true, 22: true, 25: true}
+	bannerPorts = map[int]bool{21: true, 22: true, 23: true, 25: true}
+	dockerPorts = map[int]bool{2375: true}
+)
+
+// Probe outcomes recorded on scan.OpenPort.Probe.
+const (
+	probeAnswered = "answered"
+	probeNoAnswer = "no-answer"
 )
 
 // Results enriches open ports in place (and returns the same slice for convenience).
@@ -61,11 +69,21 @@ func Results(ctx context.Context, results []scan.Result, timeout time.Duration, 
 }
 
 func needsProbe(port int) bool {
-	return httpPorts[port] || httpsPorts[port] || bannerPorts[port]
+	return httpPorts[port] || httpsPorts[port] || bannerPorts[port] || dockerPorts[port]
 }
 
+// enrichPort runs the probe for op's port and records whether any protocol
+// answered. A probe that gets nothing leaves the port label unconfirmed.
 func enrichPort(ctx context.Context, ip string, op *scan.OpenPort, timeout time.Duration) {
+	op.Probe = probeNoAnswer
+	defer func() {
+		if op.Protocol != "" {
+			op.Probe = probeAnswered
+		}
+	}()
 	switch {
+	case dockerPorts[op.Port]:
+		probeDocker(ctx, ip, op, timeout)
 	case httpsPorts[op.Port]:
 		probeTLS(ctx, ip, op, timeout)
 		if op.Port == 443 || op.Port == 8443 {
@@ -93,7 +111,61 @@ func probeBanner(ctx context.Context, ip string, op *scan.OpenPort, timeout time
 		_ = err
 		return
 	}
+	op.Protocol = bannerProtocol(op.Port, buf[:n])
 	op.Banner = sanitizeLine(string(buf[:n]))
+}
+
+// bannerProtocol names the protocol a greeting proves, if its shape matches the
+// port's conventional service: SSH identification, a 220 FTP/SMTP greeting, or
+// Telnet option negotiation (IAC) or login prompt.
+func bannerProtocol(port int, b []byte) string {
+	text := string(b)
+	switch port {
+	case 22:
+		if strings.HasPrefix(text, "SSH-") {
+			return "SSH"
+		}
+	case 21:
+		if strings.HasPrefix(text, "220") {
+			return "FTP"
+		}
+	case 25:
+		if strings.HasPrefix(text, "220") {
+			return "SMTP"
+		}
+	case 23:
+		lower := strings.ToLower(text)
+		if b[0] == 0xFF || strings.Contains(lower, "login:") || strings.Contains(lower, "username:") {
+			return "Telnet"
+		}
+	}
+	return ""
+}
+
+// probeDocker asks a plaintext Docker port for /version, a read-only call the
+// Engine API answers without authentication when it is unprotected.
+func probeDocker(ctx context.Context, ip string, op *scan.OpenPort, timeout time.Duration) {
+	url := fmt.Sprintf("http://%s/version", net.JoinHostPort(ip, fmt.Sprintf("%d", op.Port)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return
+	}
+	req.Header.Set("User-Agent", "NetworkSweeper/1.0 (local inventory)")
+	client := &http.Client{
+		Timeout:       timeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		Transport:     &http.Transport{DisableKeepAlives: true},
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode == http.StatusOK && strings.Contains(string(body), `"ApiVersion"`) {
+		op.Protocol = "Docker API"
+		op.HTTPServer = sanitizeHeader(resp.Header.Get("Server"))
+	}
 }
 
 func probeTLS(ctx context.Context, ip string, op *scan.OpenPort, timeout time.Duration) {
@@ -131,6 +203,9 @@ func probeTLS(ctx context.Context, ip string, op *scan.OpenPort, timeout time.Du
 	op.TLSNotAfter = cert.NotAfter.UTC()
 	op.TLSExpired = time.Now().After(cert.NotAfter)
 	op.TLSSelfSigned = cert.Issuer.String() == cert.Subject.String()
+	if op.Protocol == "" {
+		op.Protocol = "TLS"
+	}
 }
 
 func probeHTTP(ctx context.Context, ip string, op *scan.OpenPort, timeout time.Duration, useTLS bool) {
@@ -148,8 +223,9 @@ func probeHTTP(ctx context.Context, ip string, op *scan.OpenPort, timeout time.D
 
 	client := &http.Client{
 		Timeout: timeout,
-		CheckRedirect: func(_ *http.Request, via []*http.Request) error {
-			if len(via) >= 2 {
+		CheckRedirect: func(next *http.Request, via []*http.Request) error {
+			// Follow at most one redirect, and only on the probed device.
+			if len(via) >= 2 || !netinfo.URLOnHost(next.URL, ip) {
 				return http.ErrUseLastResponse
 			}
 			return nil
@@ -167,6 +243,10 @@ func probeHTTP(ctx context.Context, ip string, op *scan.OpenPort, timeout time.D
 		return
 	}
 	defer resp.Body.Close()
+	op.Protocol = "HTTP"
+	if useTLS {
+		op.Protocol = "HTTPS"
+	}
 	if op.HTTPServer == "" {
 		op.HTTPServer = sanitizeHeader(resp.Header.Get("Server"))
 	}

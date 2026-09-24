@@ -44,7 +44,7 @@ shasum -a 256 -c SHA256SUMS
 
 ## Elevation and Deep discovery
 
-Deep discovery on macOS is **ICMP via system `ping` plus an active ARP sweep**. It needs **both** `sudo` **and** the Deep checkbox on Overview (not inside Advanced options).
+Deep discovery on macOS is **ICMP via system `ping` plus an active ARP sweep**. It needs **both** `sudo` **and** the Deep checkbox beside **Scan** on the Devices tab.
 
 ```bash
 sudo ./network-sweeper-darwin-arm64
@@ -54,6 +54,10 @@ sudo ./network-sweeper-darwin-amd64
 
 TCP discovery and findings scans work without elevation. Full matrix: [PLATFORM.md](PLATFORM.md).
 
+## Saved history
+
+Scan history, device names, notes, tags, and finding reviews are saved in `~/Library/Application Support/network-sweeper`. Pass `--data-dir DIR` to use another folder, or `--ephemeral` to keep nothing after exit. Elevated runs (`sudo`) keep history in memory only, so root never writes into your inventory; add `--data-dir` if you want an elevated run to save. Settings → **History and saved data** shows where data lives, sets how many scans to keep (100 by default), and deletes history.
+
 ## Troubleshooting
 
 | Problem | What to try |
@@ -61,7 +65,7 @@ TCP discovery and findings scans work without elevation. Full matrix: [PLATFORM.
 | Browser didn’t open | Run with `-no-browser` and open the printed `http://127.0.0.1:…` URL |
 | Gatekeeper | Verify checksums; **Open Anyway**, or `xattr -d com.apple.quarantine` after you trust the build |
 | Zero hosts | Guest Wi‑Fi or AP isolation; try Deep discovery with `sudo` and the Deep checkbox; confirm subnet |
-| Deep discovery seems ignored | Needs `sudo` **and** the Deep checkbox (then ICMP + ARP). Check the Elevated badge and Limitations tab |
+| Deep discovery seems ignored | Needs `sudo` **and** the Deep checkbox (then ICMP + ARP). Check the Elevated badge and Settings → Platform capabilities |
 | Missing names / “Unknown” | Names fill from reverse DNS, NetBIOS, mDNS, then SSDP/SNMP hints — many IoT devices still advertise little |
 | No MAC yet | ARP cache not populated yet, or Wi‑Fi client isolation / VPN path hides L2 |
 | Found via `arp-cache`, no open ports | The device answered your computer's ARP lookup but closed every discovery port. It is on your network; a device that just left can linger for a minute |

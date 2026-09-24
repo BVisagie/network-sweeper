@@ -13,7 +13,7 @@
       <div class="brand">
         <p class="eyebrow">Local network inventory</p>
         <h1>Network Sweeper</h1>
-        <p class="tag">Find devices on your home or office LAN, see open services, and review simple exposure tips.</p>
+        <p class="tag">Keep track of the devices on your network, what they run, and what changed since last time.</p>
       </div>
       <div class="meta">
         <a
@@ -29,9 +29,14 @@
           </svg>
         </a>
         <span id="version" class="version-pill"></span>
+        <span id="storage-badge" class="badge storage-badge" hidden></span>
         <span id="priv-badge" class="badge priv-badge" aria-live="polite"></span>
       </div>
     </header>
+
+    <div id="disconnected" class="banner is-error" role="alert" hidden>
+      Lost contact with Network Sweeper. Is it still running? This page reconnects on its own once it is back.
+    </div>
 
     <section id="consent" class="panel consent reveal">
       <div class="panel-head">
@@ -40,7 +45,7 @@
       <div class="panel-body">
         <p>Only scan networks you own or are explicitly authorized to assess. By default we only scan the networks attached to this computer.</p>
         <div class="consent-subnets">
-          <p class="context-label">We’ll scan these networks</p>
+          <p class="context-label">Networks attached to this computer</p>
           <div id="consent-subnets" class="chip-row"><span class="chip soft">Loading…</span></div>
         </div>
         <label class="check">
@@ -55,21 +60,31 @@
 
     <main id="main" hidden>
       <nav class="tabs" role="tablist" aria-label="Dashboard sections">
-        <button type="button" role="tab" id="tabbtn-overview" data-tab="overview" class="active" aria-selected="true" aria-controls="tab-overview">Overview</button>
-        <button type="button" role="tab" id="tabbtn-risks" data-tab="risks" aria-selected="false" aria-controls="tab-risks">Security risks</button>
-        <button type="button" role="tab" id="tabbtn-limitations" data-tab="limitations" aria-selected="false" aria-controls="tab-limitations">Limitations</button>
-        <button type="button" role="tab" id="tabbtn-settings" data-tab="settings" aria-selected="false" aria-controls="tab-settings">Settings</button>
+        <button type="button" role="tab" id="tabbtn-devices" data-tab="devices" class="active" aria-selected="true" aria-controls="tab-devices">Devices</button>
+        <button type="button" role="tab" id="tabbtn-changes" data-tab="changes" aria-selected="false" aria-controls="tab-changes" tabindex="-1">Changes</button>
+        <button type="button" role="tab" id="tabbtn-findings" data-tab="findings" aria-selected="false" aria-controls="tab-findings" tabindex="-1">Findings</button>
+        <button type="button" role="tab" id="tabbtn-settings" data-tab="settings" aria-selected="false" aria-controls="tab-settings" tabindex="-1">Settings</button>
       </nav>
 
-      <section id="tab-overview" class="tab active" role="tabpanel" aria-labelledby="tabbtn-overview">
+      <section id="tab-devices" class="tab active" role="tabpanel" aria-labelledby="tabbtn-devices">
         <div class="panel">
           <div class="panel-head">
             <h3>Scan</h3>
+            <button type="button" class="text-link" id="caps-link">What can this computer detect?</button>
           </div>
           <div class="panel-body scan-body">
+            <fieldset class="scope">
+              <legend class="context-label">Networks to scan</legend>
+              <div id="scope-subnets" class="scope-list"><p class="empty">Loading interfaces…</p></div>
+              <label class="field grow scope-extra">
+                <span>Other ranges <small class="muted">(optional)</small></span>
+                <input id="targets" type="text" spellcheck="false" autocomplete="off" placeholder="e.g. 192.168.1.0/24, 10.0.5.10/32" />
+              </label>
+            </fieldset>
+
             <div class="scan-primary">
               <div class="scan-actions">
-                <button id="scan-btn" class="primary large">Scan my network</button>
+                <button id="scan-btn" class="primary large">Scan</button>
                 <button id="stop-btn" class="ghost" hidden>Stop</button>
               </div>
               <label class="check deep-check" id="deep-label">
@@ -82,88 +97,103 @@
               </label>
             </div>
 
+            <p id="preview" class="preview" aria-live="polite"></p>
             <p id="scan-status" class="status-line" aria-live="polite"></p>
-            <div class="progress-wrap" id="progress-wrap" hidden>
-              <div class="progress-bar" id="progress-bar" style="width:0%"></div>
+            <div id="progress" class="progress" hidden>
+              <ol id="phases" class="phases" aria-label="Scan phases"></ol>
+              <div class="progress-wrap"><div class="progress-bar" id="progress-bar" style="width:0%"></div></div>
+              <div id="live" class="live"></div>
             </div>
             <p id="scan-note" class="scan-callout" hidden></p>
-
-            <details class="advanced" id="advanced">
-              <summary>Advanced options</summary>
-              <div class="advanced-body">
-                <label class="field grow">
-                  <span>Target CIDR(s)</span>
-                  <input id="targets" type="text" spellcheck="false" autocomplete="off" placeholder="Leave empty for local subnets" />
-                  <small class="help">Example: <code>192.168.1.0/24</code>. Empty = all detected local subnets.</small>
-                </label>
-                <div class="toolbar-actions">
-                  <button id="export-json" class="ghost" type="button">Export JSON</button>
-                  <button id="export-csv" class="ghost" type="button">Export CSV</button>
-                </div>
-              </div>
-            </details>
           </div>
         </div>
 
+        <div id="inventory-banners"></div>
         <div id="summary" class="summary-strip" hidden></div>
 
-        <div class="overview-layout">
-          <aside class="panel context-panel">
-            <div class="panel-head">
-              <h3>Network context</h3>
-            </div>
-            <div id="network-context" class="panel-body context-body">
-              <p class="empty">Loading interfaces…</p>
-            </div>
-            <details class="how-scanning">
-              <summary>How scanning works</summary>
-              <div class="panel-body">
-                <p class="help">We first look for devices on common “discovery” ports. Then we check a broader list of ports on devices we found to label services and suggest risks. Quiet devices on your local network are also picked up from your computer’s ARP cache; others may need Deep discovery (ping; ARP on elevated Linux/macOS).</p>
-                <div id="port-lists"></div>
-              </div>
-            </details>
-          </aside>
-
-          <section class="panel hosts-panel">
-            <div class="panel-head">
-              <h3>Hosts</h3>
-              <span id="host-count" class="count-pill">0</span>
-            </div>
-            <div class="panel-body hosts-toolbar">
-              <label class="field grow compact">
-                <span class="sr-only">Filter hosts</span>
-                <input id="host-filter" type="search" placeholder="Filter by IP, name, MAC, vendor…" autocomplete="off" />
+        <section class="panel hosts-panel">
+          <div class="panel-head">
+            <h3>Devices <span id="host-count" class="count-pill">0</span></h3>
+            <div class="head-actions">
+              <label class="field compact profile-pick" id="profile-pick" hidden>
+                <span class="sr-only">Network</span>
+                <select id="profile-select"></select>
               </label>
+              <details class="export-menu">
+                <summary>Export</summary>
+                <div class="export-body">
+                  <button id="export-json" class="ghost compact" type="button">Latest scan (JSON)</button>
+                  <button id="export-csv" class="ghost compact" type="button">Latest scan (CSV)</button>
+                  <button id="export-inventory" class="ghost compact" type="button">Devices and notes (JSON)</button>
+                </div>
+              </details>
             </div>
-            <div id="hosts" class="hosts-body">
-              <p class="empty">Run a scan to populate discovered hosts.</p>
-            </div>
-          </section>
-        </div>
+          </div>
+          <div class="panel-body device-filters">
+            <label class="field grow compact">
+              <span class="sr-only">Search devices</span>
+              <input id="host-filter" type="search" placeholder="Search IP, name, MAC, vendor, notes…" autocomplete="off" />
+            </label>
+            <label class="field compact"><span>Service</span><select id="f-service"></select></label>
+            <label class="field compact"><span>Vendor</span><select id="f-vendor"></select></label>
+            <label class="field compact"><span>Tag</span><select id="f-tag"></select></label>
+            <label class="field compact"><span>Seen</span>
+              <select id="f-seen">
+                <option value="">Any</option>
+                <option value="new">New in latest scan</option>
+                <option value="latest">In latest scan</option>
+                <option value="missing">Not in latest scan</option>
+              </select>
+            </label>
+            <label class="field compact"><span>Findings</span>
+              <select id="f-findings">
+                <option value="">Any</option>
+                <option value="open">Open findings</option>
+                <option value="acknowledged">Acknowledged</option>
+                <option value="none">No findings</option>
+              </select>
+            </label>
+          </div>
+          <div id="hosts" class="hosts-body">
+            <p class="empty">Run a scan to build your device list.</p>
+          </div>
+        </section>
       </section>
 
-      <section id="tab-risks" class="tab" role="tabpanel" hidden aria-labelledby="tabbtn-risks">
+      <section id="tab-changes" class="tab" role="tabpanel" hidden aria-labelledby="tabbtn-changes">
         <div class="panel">
           <div class="panel-head">
-            <h3>Findings</h3>
-            <span id="finding-count" class="count-pill">0</span>
+            <h3>What changed</h3>
           </div>
           <div class="panel-body">
-            <p id="risks-intro" class="help">Findings are grouped by device. Start with critical and high items first.</p>
-            <div id="sev-filters" class="chip-row filters" role="group" aria-label="Filter by severity"></div>
-            <div id="findings" class="findings-body">
-              <p class="empty">No findings yet. Run a scan from Overview.</p>
+            <div class="compare-pick">
+              <label class="field compact"><span>Current scan</span><select id="cmp-current"></select></label>
+              <label class="field compact"><span>Compared with</span><select id="cmp-previous"></select></label>
             </div>
+            <div id="changes"><p class="empty">Changes appear after two scans of the same network.</p></div>
           </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Scan history <span id="history-count" class="count-pill">0</span></h3>
+          </div>
+          <div id="history" class="hosts-body"><p class="empty">No saved scans yet.</p></div>
         </div>
       </section>
 
-      <section id="tab-limitations" class="tab" role="tabpanel" hidden aria-labelledby="tabbtn-limitations">
+      <section id="tab-findings" class="tab" role="tabpanel" hidden aria-labelledby="tabbtn-findings">
         <div class="panel">
           <div class="panel-head">
-            <h3>Platform capabilities</h3>
+            <h3>Findings <span id="finding-count" class="count-pill">0</span></h3>
           </div>
-          <div id="platform" class="panel-body"></div>
+          <div class="panel-body">
+            <p class="help">Each finding says how sure it is. <strong>Confirmed</strong> means a device's response backs it; <strong>inferred</strong> means only an open port does. Severity says how much it would matter if true.</p>
+            <div id="status-filters" class="chip-row filters" role="group" aria-label="Filter by review status"></div>
+            <div id="sev-filters" class="chip-row filters" role="group" aria-label="Filter by severity"></div>
+            <div id="findings" class="findings-body">
+              <p class="empty">No findings yet. Run a scan from Devices.</p>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -176,7 +206,7 @@
             <label class="check setting-row">
               <input type="checkbox" id="custom-optin" />
               <span>
-                <strong>Allow custom CIDR outside detected local subnets</strong>
+                <strong>Allow custom ranges outside detected local subnets</strong>
                 <small>Server-enforced. Without this, non-local ranges are rejected.</small>
               </span>
             </label>
@@ -193,21 +223,58 @@
             <div id="update-result" class="update-result" hidden></div>
           </div>
         </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h3>History and saved data</h3>
+          </div>
+          <div class="panel-body settings-stack">
+            <p id="storage-status" class="help"></p>
+            <div class="setting-inline">
+              <label class="field compact"><span>Network name</span><input id="profile-name" type="text" maxlength="80" autocomplete="off" /></label>
+              <button id="profile-save" class="ghost" type="button">Rename</button>
+            </div>
+            <div class="setting-inline">
+              <label class="field compact"><span>Scans to keep</span><input id="retention" type="number" min="1" max="1000" step="1" /></label>
+              <button id="retention-save" class="ghost" type="button">Save</button>
+            </div>
+            <p class="help">Older scans are removed beyond this number. Device names, notes, tags, and reviews are kept.</p>
+            <div class="settings-actions danger-zone">
+              <button id="delete-history" class="ghost" type="button">Delete scan history</button>
+              <button id="delete-all" class="ghost danger" type="button">Delete all saved data</button>
+            </div>
+            <p id="data-result" class="status-line" aria-live="polite"></p>
+          </div>
+        </div>
+
+        <div class="panel" id="capabilities">
+          <div class="panel-head">
+            <h3>Platform capabilities</h3>
+          </div>
+          <div id="platform" class="panel-body"></div>
+          <details class="how-scanning">
+            <summary>How scanning works</summary>
+            <div class="panel-body">
+              <p class="help">We first look for devices on common “discovery” ports. Then we check a broader list of ports on devices we found to label services and suggest risks. Quiet devices on your local network are also picked up from your computer’s ARP cache; others may need Deep discovery (ping; ARP on elevated Linux/macOS).</p>
+              <div id="port-lists"></div>
+            </div>
+          </details>
+        </div>
       </section>
     </main>
   </div>
   <div id="float-tip" class="float-tip" role="tooltip" hidden></div>
-  <div id="risk-modal" class="modal" hidden>
+  <div id="modal" class="modal" hidden>
     <div class="modal-backdrop" data-close-modal></div>
-    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="risk-modal-title">
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="modal-title">
       <div class="modal-head">
         <div>
-          <h2 id="risk-modal-title">Security risks</h2>
-          <p id="risk-modal-sub" class="modal-sub"></p>
+          <h2 id="modal-title"></h2>
+          <p id="modal-sub" class="modal-sub"></p>
         </div>
         <button type="button" class="ghost modal-close" data-close-modal aria-label="Close">Close</button>
       </div>
-      <div id="risk-modal-body" class="modal-body"></div>
+      <div id="modal-body" class="modal-body"></div>
     </div>
   </div>
   <script>

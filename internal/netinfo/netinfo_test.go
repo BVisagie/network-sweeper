@@ -2,6 +2,7 @@ package netinfo
 
 import (
 	"net"
+	"net/url"
 	"testing"
 )
 
@@ -51,5 +52,59 @@ func TestParseCIDRList(t *testing.T) {
 	}
 	if len(nets) != 2 {
 		t.Fatalf("got %d", len(nets))
+	}
+}
+
+func TestURLOnHost(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want bool
+	}{
+		{"http://192.168.1.5:1400/xml/desc.xml", true},
+		{"HTTPS://192.168.1.5/", true},
+		{"http://192.168.1.6/", false},
+		{"http://router.local/", false},
+		{"http://192.168.1.5@10.0.0.1/", false},
+		{"http://127.0.0.1:8080/", false},
+		{"ftp://192.168.1.5/", false},
+		{"/relative/path", false},
+	}
+	for _, c := range cases {
+		u, err := url.Parse(c.raw)
+		if err != nil {
+			t.Fatalf("parse %q: %v", c.raw, err)
+		}
+		if got := URLOnHost(u, "192.168.1.5"); got != c.want {
+			t.Errorf("URLOnHost(%q) = %v, want %v", c.raw, got, c.want)
+		}
+	}
+}
+
+func TestUniqueHosts(t *testing.T) {
+	parse := func(cidrs ...string) []*net.IPNet {
+		var out []*net.IPNet
+		for _, c := range cidrs {
+			_, n, err := net.ParseCIDR(c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, n)
+		}
+		return out
+	}
+	// A /24 inside a /23 adds nothing; the overlap is scanned once.
+	hosts, ok := UniqueHosts(parse("192.168.0.0/23", "192.168.1.0/24"), 1024)
+	if !ok || len(hosts) != 510 {
+		t.Fatalf("overlap: ok=%v n=%d, want 510", ok, len(hosts))
+	}
+	// Two /23s fit exactly at 1,020; a /16 never does.
+	if _, ok := UniqueHosts(parse("10.0.0.0/23", "10.0.2.0/23"), 1020); !ok {
+		t.Fatal("expected 1,020 addresses to fit a limit of 1,020")
+	}
+	if _, ok := UniqueHosts(parse("10.0.0.0/23", "10.0.2.0/23"), 1019); ok {
+		t.Fatal("expected 1,020 addresses to exceed a limit of 1,019")
+	}
+	if _, ok := UniqueHosts(parse("172.17.0.0/16"), 1024); ok {
+		t.Fatal("expected a /16 to exceed the limit")
 	}
 }

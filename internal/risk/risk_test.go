@@ -9,21 +9,66 @@ import (
 	"github.com/BVisagie/network-sweeper/internal/scan"
 )
 
-func TestEvaluateTelnet(t *testing.T) {
-	hosts := []discover.Host{{IP: "192.168.1.10"}}
-	results := []scan.Result{{
-		IP:    "192.168.1.10",
-		Ports: []scan.OpenPort{{Port: 23, Service: "Telnet"}},
-	}}
-	f := Evaluate(hosts, results)
-	found := false
-	for _, x := range f {
-		if x.Severity == SeverityCritical && x.Port == 23 {
-			found = true
-		}
+// TestEvaluateEvidenceMatrix checks that severity follows evidence: an open
+// port alone is inferred and modest, a protocol answer is confirmed, a silent
+// probe stays inferred and says so, and a gateway gets one finding per port.
+func TestEvaluateEvidenceMatrix(t *testing.T) {
+	cases := []struct {
+		name       string
+		host       discover.Host
+		port       scan.OpenPort
+		wantID     string
+		severity   string
+		confidence string
+		category   string
+		unknownHas string
+	}{
+		{"telnet port only", discover.Host{IP: "10.0.0.1"}, scan.OpenPort{Port: 23},
+			"telnet-open-10.0.0.1", SeverityMedium, ConfidenceInferred, CategoryExposure, "Only the TCP port"},
+		{"telnet answered", discover.Host{IP: "10.0.0.1"}, scan.OpenPort{Port: 23, Protocol: "Telnet", Probe: "answered"},
+			"telnet-open-10.0.0.1", SeverityHigh, ConfidenceConfirmed, CategoryIssue, "trusted hosts"},
+		{"telnet probe silent", discover.Host{IP: "10.0.0.1"}, scan.OpenPort{Port: 23, Probe: "no-answer"},
+			"telnet-open-10.0.0.1", SeverityMedium, ConfidenceInferred, CategoryExposure, "no recognizable answer"},
+		{"docker port only", discover.Host{IP: "10.0.0.2"}, scan.OpenPort{Port: 2375},
+			"docker-api-10.0.0.2", SeverityMedium, ConfidenceInferred, CategoryExposure, ""},
+		{"docker answered", discover.Host{IP: "10.0.0.2"}, scan.OpenPort{Port: 2375, Protocol: "Docker API", Probe: "answered"},
+			"docker-api-10.0.0.2", SeverityCritical, ConfidenceConfirmed, CategoryIssue, ""},
+		{"smb port only", discover.Host{IP: "10.0.0.3"}, scan.OpenPort{Port: 445},
+			"smb-open-10.0.0.3", SeverityLow, ConfidenceInferred, CategoryExposure, "not checked"},
+		{"database port only", discover.Host{IP: "10.0.0.4"}, scan.OpenPort{Port: 3306},
+			"mysql-open-10.0.0.4", SeverityLow, ConfidenceInferred, CategoryExposure, ""},
+		{"rdp on gateway", discover.Host{IP: "10.0.0.254", IsGateway: true}, scan.OpenPort{Port: 3389},
+			"gateway-mgmt-3389-10.0.0.254", SeverityMedium, ConfidenceInferred, CategoryExposure, ""},
+		{"telnet answered on gateway", discover.Host{IP: "10.0.0.254", IsGateway: true}, scan.OpenPort{Port: 23, Protocol: "Telnet", Probe: "answered"},
+			"gateway-mgmt-23-10.0.0.254", SeverityHigh, ConfidenceConfirmed, CategoryIssue, ""},
 	}
-	if !found {
-		t.Fatal("expected critical telnet finding")
+	for _, c := range cases {
+		c.host.Hostname = "named" // keep the unidentified-device finding out of the way
+		fs := Evaluate([]discover.Host{c.host}, []scan.Result{{IP: c.host.IP, Ports: []scan.OpenPort{c.port}}})
+		var got []Finding
+		for _, f := range fs {
+			if f.Port == c.port.Port {
+				got = append(got, f)
+			}
+		}
+		if len(got) != 1 {
+			t.Errorf("%s: %d findings for port %d, want exactly 1: %+v", c.name, len(got), c.port.Port, got)
+			continue
+		}
+		f := got[0]
+		if f.ID != c.wantID || f.Severity != c.severity || f.Confidence != c.confidence || f.Category != c.category {
+			t.Errorf("%s: got %s %s/%s/%s, want %s %s/%s/%s", c.name,
+				f.ID, f.Severity, f.Confidence, f.Category, c.wantID, c.severity, c.confidence, c.category)
+		}
+		if !strings.Contains(f.Unknown, c.unknownHas) {
+			t.Errorf("%s: unknown %q does not mention %q", c.name, f.Unknown, c.unknownHas)
+		}
+		if len(f.Evidence) == 0 || f.Evidence[0].Method != "tcp-connect" {
+			t.Errorf("%s: missing tcp-connect evidence: %+v", c.name, f.Evidence)
+		}
+		if c.confidence == ConfidenceConfirmed && len(f.Evidence) < 2 {
+			t.Errorf("%s: confirmed finding lacks response evidence: %+v", c.name, f.Evidence)
+		}
 	}
 }
 
@@ -76,23 +121,6 @@ func TestEvaluateDatabaseAndHTTPAlt(t *testing.T) {
 		if !ok {
 			t.Fatalf("missing finding %s", id)
 		}
-	}
-}
-
-func TestEvaluateGatewayContext(t *testing.T) {
-	hosts := []discover.Host{{IP: "192.168.1.1", IsGateway: true}}
-	results := []scan.Result{{
-		IP:    "192.168.1.1",
-		Ports: []scan.OpenPort{{Port: 3389, Service: "RDP"}},
-	}}
-	found := false
-	for _, x := range Evaluate(hosts, results) {
-		if x.ID == "gateway-mgmt-3389-192.168.1.1" && x.Severity == SeverityHigh {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatal("expected gateway management finding")
 	}
 }
 

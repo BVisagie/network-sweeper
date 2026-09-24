@@ -18,7 +18,7 @@ func TestServiceNames(t *testing.T) {
 func TestScanHostsCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := ScanHosts(ctx, []string{"127.0.0.1"}, 50*time.Millisecond, 2)
+	_, err := ScanHosts(ctx, []string{"127.0.0.1"}, 50*time.Millisecond, 2, nil)
 	// canceled context should not panic; error may be nil or context error depending on timing
 	_ = err
 }

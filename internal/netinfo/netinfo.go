@@ -3,6 +3,7 @@ package netinfo
 import (
 	"fmt"
 	"net"
+	"net/url"
 	"strings"
 )
 
@@ -156,6 +157,17 @@ func RangeAllowed(targets, local []*net.IPNet, customOptIn bool) error {
 	return nil
 }
 
+// URLOnHost reports whether u is an http(s) URL whose host is the IP literal ip.
+// Hostnames are refused rather than resolved, so DNS cannot point a probe elsewhere.
+func URLOnHost(u *url.URL, ip string) bool {
+	if u == nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return false
+	}
+	want := net.ParseIP(ip)
+	got := net.ParseIP(u.Hostname())
+	return want != nil && got != nil && got.Equal(want)
+}
+
 func sameNetwork(a, b *net.IPNet) bool {
 	if a == nil || b == nil {
 		return false
@@ -185,6 +197,27 @@ func HostsInCIDR(cidr *net.IPNet, maxHosts int) []net.IP {
 		hosts = append(hosts, net.IPv4(byte(v>>24), byte(v>>16), byte(v>>8), byte(v)))
 	}
 	return hosts
+}
+
+// UniqueHosts returns the usable IPv4 addresses across targets, each once, in
+// target order. ok is false when the targets hold more than max distinct
+// addresses: callers refuse such a selection rather than scan a prefix of it.
+func UniqueHosts(targets []*net.IPNet, max int) (hosts []net.IP, ok bool) {
+	seen := map[string]bool{}
+	for _, t := range targets {
+		for _, ip := range HostsInCIDR(t, max+1) {
+			key := ip.String()
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			if len(hosts) == max {
+				return nil, false
+			}
+			hosts = append(hosts, ip)
+		}
+	}
+	return hosts, true
 }
 
 // CountUsableHosts returns how many host addresses a CIDR would yield (network/broadcast skipped for masks < 31).

@@ -2,6 +2,7 @@ package discover
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"sort"
@@ -32,6 +33,8 @@ type Host struct {
 	// DuplicateMACs lists every MAC that answered ARP for this IP when more
 	// than one did (active ARP sweep only).
 	DuplicateMACs []string `json:"duplicateMacs,omitempty"`
+	// DeviceID links the host to its inventory device, once recorded.
+	DeviceID string `json:"deviceId,omitempty"`
 }
 
 // Options controls discovery behavior.
@@ -44,15 +47,20 @@ type Options struct {
 	UseICMP     bool // also try ICMP (e.g. Windows unprivileged boost)
 	UseARP      bool // elevated active ARP sweep (Unix); ignored when unsupported
 	Progress    func(done, total int, msg string)
+	// OnHost, when set, is called once per live host as it is found (from a
+	// single goroutine), so callers can show partial results.
+	OnHost func(ip, via string)
 }
 
-// Result is discovery output plus truncation metadata.
+// Result is discovery output.
 type Result struct {
-	Hosts            []Host
-	Truncated        bool
-	HostsEnumerated  int
-	HostsAvailable   int
+	Hosts           []Host
+	HostsEnumerated int
 }
+
+// ErrTooManyAddresses is returned when targets hold more distinct addresses
+// than Options.MaxHosts. Callers check the size first (netinfo.UniqueHosts).
+var ErrTooManyAddresses = errors.New("targets hold more addresses than the scan limit")
 
 // Engine runs host discovery.
 type Engine struct {
@@ -75,21 +83,20 @@ func (e *Engine) Discover(ctx context.Context, opt Options) (Result, error) {
 		opt.MaxHosts = 1024
 	}
 
-	available := 0
-	for _, t := range opt.Targets {
-		available += netinfo.CountUsableHosts(t)
+	ips, ok := netinfo.UniqueHosts(opt.Targets, opt.MaxHosts)
+	if !ok {
+		return Result{}, ErrTooManyAddresses
 	}
-
-	var ips []net.IP
-	for _, t := range opt.Targets {
-		remain := opt.MaxHosts - len(ips)
-		if remain <= 0 {
-			break
-		}
-		ips = append(ips, netinfo.HostsInCIDR(t, remain)...)
+	enumerated := make(map[string]bool, len(ips))
+	for _, ip := range ips {
+		enumerated[ip.String()] = true
 	}
-	truncated := available > len(ips)
 	total := len(ips)
+	found := func(ip, via string) {
+		if opt.OnHost != nil {
+			opt.OnHost(ip, via)
+		}
+	}
 	if opt.Progress != nil {
 		opt.Progress(0, total, "starting discovery")
 	}
@@ -169,6 +176,7 @@ func (e *Engine) Discover(ctx context.Context, opt Options) (Result, error) {
 			LastSeen: time.Now(),
 		}
 		alive[key] = h
+		found(key, r.via)
 	}
 
 	if opt.UseARP && ARPSweepSupported() {
@@ -182,6 +190,9 @@ func (e *Engine) Discover(ctx context.Context, opt Options) (Result, error) {
 		for ip, macs := range SweepARP(ctx, opt.Targets, arpTimeout) {
 			if ctx.Err() != nil {
 				break
+			}
+			if !enumerated[ip] {
+				continue
 			}
 			var dups []string
 			if len(macs) > 1 {
@@ -202,15 +213,14 @@ func (e *Engine) Discover(ctx context.Context, opt Options) (Result, error) {
 				AliveVia:      []string{"arp"},
 				LastSeen:      time.Now(),
 			}
+			found(ip, "arp")
 		}
 	}
 
-	enumerated := make(map[string]bool, len(ips))
-	for _, ip := range ips {
-		enumerated[ip.String()] = true
-	}
 	arpTable := readARPEntries()
-	promoteARPCache(alive, arpTable, enumerated)
+	for _, ip := range promoteARPCache(alive, arpTable, enumerated) {
+		found(ip, "arp-cache")
+	}
 
 	out := make([]Host, 0, len(alive))
 	for _, h := range alive {
@@ -225,20 +235,17 @@ func (e *Engine) Discover(ctx context.Context, opt Options) (Result, error) {
 	sort.Slice(out, func(i, j int) bool {
 		return ipLess(out[i].IP, out[j].IP)
 	})
-	return Result{
-		Hosts:           out,
-		Truncated:       truncated,
-		HostsEnumerated: total,
-		HostsAvailable:  available,
-	}, ctx.Err()
+	return Result{Hosts: out, HostsEnumerated: total}, ctx.Err()
 }
 
 // promoteARPCache adds hosts that only the ARP cache knows about. Every TCP
 // dial made the OS resolve the target's MAC first, so the cache holds on-link
 // hosts that closed every discovery port: no elevation needed on any OS.
 // Static rows are skipped (the OS never asked the network for them), as are
-// non-unicast MACs and addresses outside the enumerated targets.
-func promoteARPCache(alive map[string]*Host, table map[string]arpEntry, enumerated map[string]bool) {
+// non-unicast MACs and addresses outside the enumerated targets. It returns
+// the promoted addresses.
+func promoteARPCache(alive map[string]*Host, table map[string]arpEntry, enumerated map[string]bool) []string {
+	var added []string
 	for ip, e := range table {
 		if _, ok := alive[ip]; ok || e.Static || !enumerated[ip] || !unicastMAC(e.MAC) {
 			continue
@@ -249,7 +256,9 @@ func promoteARPCache(alive map[string]*Host, table map[string]arpEntry, enumerat
 			AliveVia: []string{"arp-cache"},
 			LastSeen: time.Now(),
 		}
+		added = append(added, ip)
 	}
+	return added
 }
 
 func ipLess(a, b string) bool {

@@ -6,8 +6,11 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
+
+	"github.com/BVisagie/network-sweeper/internal/netinfo"
 )
 
 const ssdpPort = 1900
@@ -87,6 +90,8 @@ func ProbeSSDP(ctx context.Context, hosts []Host, window time.Duration) {
 			}
 			return nil
 		},
+		// Own transport: no environment proxy for LAN description fetches.
+		Transport: &http.Transport{DisableKeepAlives: true},
 	}
 	for ip, loc := range seen {
 		if ctx.Err() != nil {
@@ -94,6 +99,12 @@ func ProbeSSDP(ctx context.Context, hosts []Host, window time.Duration) {
 		}
 		h := byIP[ip]
 		if h == nil {
+			continue
+		}
+		// Only fetch descriptions served by the responder itself; a LOCATION on
+		// another address (some bridges and Docker hosts) leaves the name unset.
+		u, err := url.Parse(loc)
+		if err != nil || !netinfo.URLOnHost(u, ip) {
 			continue
 		}
 		name := fetchUPnPFriendlyName(ctx, client, loc)
