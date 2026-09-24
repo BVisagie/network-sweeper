@@ -70,7 +70,7 @@ TCP discovery and findings scans work without elevation. Full matrix: [PLATFORM.
 
 ## Developers
 
-Go **1.26.5+** (see `go.mod`). Confirm with `go version`.
+Go **1.27.1+** (see `go.mod`). Confirm with `go version`.
 
 ```bash
 # Homebrew

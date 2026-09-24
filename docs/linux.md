@@ -55,7 +55,7 @@ curl -fsSL https://raw.githubusercontent.com/BVisagie/network-sweeper/main/scrip
 curl -fsSL https://raw.githubusercontent.com/BVisagie/network-sweeper/main/scripts/install.sh | bash -s -- --install-only --prefix "$HOME/.local/bin"
 ```
 
-On SSH/headless sessions with no display, the launcher passes `-no-browser` and prints the dashboard URL. The installer downloads a **published release** (not `main` source) and will fail with a plain-language message until a Release exists. See [SECURITY.md](../SECURITY.md).
+On SSH/headless sessions with no display, the launcher passes `-no-browser` and prints the dashboard URL. The installer downloads the latest **published release** (not `main` source); if GitHub is unreachable it stops with a plain-language message. See [SECURITY.md](../SECURITY.md).
 
 ## Manual download
 
@@ -114,12 +114,19 @@ TCP discovery and findings scans work without elevation. Full matrix: [PLATFORM.
 
 ## Developers
 
-Go **1.26.5+** (see `go.mod`). Confirm with `go version`. If your distro’s package is older, use the [official Go install](https://go.dev/dl/).
+Go **1.27.1+** (see `go.mod`). Confirm with `go version`. If your distro’s package is older, use the [official Go install](https://go.dev/dl/).
 
 **Fedora / RHEL-family**
 
 ```bash
 sudo dnf install -y golang make git
+go version
+```
+
+**Arch / Omarchy**
+
+```bash
+sudo pacman -S --needed go make git
 go version
 ```
 

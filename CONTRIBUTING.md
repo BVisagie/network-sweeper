@@ -2,11 +2,9 @@
 
 Thanks for helping improve Network Sweeper.
 
-By participating, you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
-
 ## Setup
 
-1. Install Go **1.26.5+** (and optional `make` / `git`) for your OS — see the **Developers** section in [docs/linux.md](docs/linux.md), [docs/windows.md](docs/windows.md), or [docs/macos.md](docs/macos.md).
+1. Install Go **1.27.1+** (and optional `make` / `git`) for your OS — see the **Developers** section in [docs/linux.md](docs/linux.md), [docs/windows.md](docs/windows.md), or [docs/macos.md](docs/macos.md).
 2. Confirm: `go version`
 3. Clone and verify:
 

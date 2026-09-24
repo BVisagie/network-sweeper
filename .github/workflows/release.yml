@@ -24,7 +24,7 @@ jobs:
           export VERSION="${VERSION#v}"
           make cross
       - name: Upload artifacts
-        uses: softprops/action-gh-release@v3.0.2
+        uses: softprops/action-gh-release@v3.0.3
         with:
           files: |
             dist/network-sweeper-linux-amd64

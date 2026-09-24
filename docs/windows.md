@@ -69,7 +69,7 @@ TCP discovery and findings scans work without elevation. Full matrix: [PLATFORM.
 
 ## Developers
 
-Go **1.26.5+** (see `go.mod`). Confirm with `go version`. Open a **new** terminal after install so `PATH` picks up `go`.
+Go **1.27.1+** (see `go.mod`). Confirm with `go version`. Open a **new** terminal after install so `PATH` picks up `go`.
 
 - Winget: `winget install GoLang.Go`
 - Or the MSI from [go.dev/dl](https://go.dev/dl/)
