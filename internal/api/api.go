@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net"
@@ -250,31 +251,41 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.mu.Lock()
-	// Per-scan opt-in from the request, or Settings toggle — scan body does not permanently sticky-set settings.
-	custom := req.CustomOptIn || s.customOptIn
-	if s.scanRunning {
-		s.mu.Unlock()
-		http.Error(w, "scan already running", http.StatusConflict)
+	ctx, custom, err := s.reserveScan(targets, local, req.CustomOptIn)
+	if errors.Is(err, errScanRunning) {
+		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	s.mu.Unlock()
-
-	if err := netinfo.RangeAllowed(targets, local, custom); err != nil {
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
 
+	go s.runScan(ctx, targets, req.Deep, custom)
+
+	writeJSON(w, map[string]any{"status": "started"})
+}
+
+var errScanRunning = errors.New("scan already running")
+
+// reserveScan checks the range and claims the single scan slot under one lock,
+// so simultaneous requests cannot both start a scan.
+func (s *Server) reserveScan(targets, local []*net.IPNet, customOptIn bool) (context.Context, bool, error) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.scanRunning {
+		return nil, false, errScanRunning
+	}
+	// Per-scan opt-in from the request, or Settings toggle — scan body does not permanently sticky-set settings.
+	custom := customOptIn || s.customOptIn
+	if err := netinfo.RangeAllowed(targets, local, custom); err != nil {
+		return nil, false, err
+	}
 	s.scanRunning = true
 	s.scanProgress = "starting"
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	s.cancelScan = cancel
-	s.mu.Unlock()
-
-	go s.runScan(ctx, targets, req.Deep, custom)
-
-	writeJSON(w, map[string]any{"status": "started"})
+	return ctx, custom, nil
 }
 
 func (s *Server) handleScanCancel(w http.ResponseWriter, r *http.Request) {

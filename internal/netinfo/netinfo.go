@@ -3,6 +3,7 @@ package netinfo
 import (
 	"fmt"
 	"net"
+	"net/url"
 	"strings"
 )
 
@@ -154,6 +155,17 @@ func RangeAllowed(targets, local []*net.IPNet, customOptIn bool) error {
 		}
 	}
 	return nil
+}
+
+// URLOnHost reports whether u is an http(s) URL whose host is the IP literal ip.
+// Hostnames are refused rather than resolved, so DNS cannot point a probe elsewhere.
+func URLOnHost(u *url.URL, ip string) bool {
+	if u == nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return false
+	}
+	want := net.ParseIP(ip)
+	got := net.ParseIP(u.Hostname())
+	return want != nil && got != nil && got.Equal(want)
 }
 
 func sameNetwork(a, b *net.IPNet) bool {

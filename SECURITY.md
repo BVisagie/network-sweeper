@@ -21,4 +21,5 @@ Do not `curl | sudo bash` (runs the installer as root). `sudo curl | bash` only 
 - The local API binds to loopback and uses a per-launch token + Origin checks. Loopback alone is not sufficient against malicious browser pages.
 - Findings are **heuristic and educational**, not proof of exploitability.
 - Soft probes (e.g. SNMP community `public`, SSDP) are single-shot inventory checks — not brute force or exploit modules.
+- HTTP enrichment follows at most one redirect, and SSDP device descriptions are fetched, only on the probed device's own IP address and without environment proxies.
 - Do not send exploit payloads or weaponized scan modules as contributions.

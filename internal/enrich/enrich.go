@@ -16,6 +16,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/BVisagie/network-sweeper/internal/netinfo"
 	"github.com/BVisagie/network-sweeper/internal/scan"
 )
 
@@ -148,8 +149,9 @@ func probeHTTP(ctx context.Context, ip string, op *scan.OpenPort, timeout time.D
 
 	client := &http.Client{
 		Timeout: timeout,
-		CheckRedirect: func(_ *http.Request, via []*http.Request) error {
-			if len(via) >= 2 {
+		CheckRedirect: func(next *http.Request, via []*http.Request) error {
+			// Follow at most one redirect, and only on the probed device.
+			if len(via) >= 2 || !netinfo.URLOnHost(next.URL, ip) {
 				return http.ErrUseLastResponse
 			}
 			return nil

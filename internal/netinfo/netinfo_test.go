@@ -2,6 +2,7 @@ package netinfo
 
 import (
 	"net"
+	"net/url"
 	"testing"
 )
 
@@ -51,5 +52,30 @@ func TestParseCIDRList(t *testing.T) {
 	}
 	if len(nets) != 2 {
 		t.Fatalf("got %d", len(nets))
+	}
+}
+
+func TestURLOnHost(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want bool
+	}{
+		{"http://192.168.1.5:1400/xml/desc.xml", true},
+		{"HTTPS://192.168.1.5/", true},
+		{"http://192.168.1.6/", false},
+		{"http://router.local/", false},
+		{"http://192.168.1.5@10.0.0.1/", false},
+		{"http://127.0.0.1:8080/", false},
+		{"ftp://192.168.1.5/", false},
+		{"/relative/path", false},
+	}
+	for _, c := range cases {
+		u, err := url.Parse(c.raw)
+		if err != nil {
+			t.Fatalf("parse %q: %v", c.raw, err)
+		}
+		if got := URLOnHost(u, "192.168.1.5"); got != c.want {
+			t.Errorf("URLOnHost(%q) = %v, want %v", c.raw, got, c.want)
+		}
 	}
 }

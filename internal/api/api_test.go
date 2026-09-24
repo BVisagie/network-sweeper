@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
 
@@ -144,5 +147,27 @@ func TestIndexInjectsToken(t *testing.T) {
 	}
 	if !bytes.Contains(rr.Body.Bytes(), []byte(s.Token)) {
 		t.Fatal("token not injected")
+	}
+}
+
+func TestReserveScanAdmitsOne(t *testing.T) {
+	s := New(testFS(), false)
+	_, lan, _ := net.ParseCIDR("192.168.1.0/24")
+	nets := []*net.IPNet{lan}
+	var admitted atomic.Int32
+	var wg sync.WaitGroup
+	for i := 0; i < 32; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, _, err := s.reserveScan(nets, nets, false); err == nil {
+				admitted.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	s.cancelScan()
+	if n := admitted.Load(); n != 1 {
+		t.Fatalf("admitted %d scans, want 1", n)
 	}
 }
