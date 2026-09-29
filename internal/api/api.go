@@ -86,6 +86,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/history/delete", s.withSecurity(s.handleDeleteHistory))
 	mux.HandleFunc("GET /api/changes", s.withSecurity(s.handleChanges))
 	mux.HandleFunc("POST /api/profiles/{id}", s.withSecurity(s.handleProfile))
+	mux.HandleFunc("GET /api/analysis-prompt", s.withSecurity(s.handleAnalysisPrompt))
 	mux.Handle("/", s.uiHandler())
 	return mux
 }

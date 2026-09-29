@@ -1692,6 +1692,11 @@ body.modal-open { overflow: hidden; }
 
 .annotate { display: grid; gap: 0.6rem; }
 
+.ai-analysis { display: grid; gap: 0.6rem; }
+.ai-analysis .check { margin: 0; }
+.ai-masks { display: flex; flex-wrap: wrap; gap: 0 1.2rem; }
+.field textarea.ai-prompt { min-height: 12rem; max-height: 45vh; font-family: var(--mono); font-size: 0.78rem; }
+
 .form-actions {
   display: flex;
   flex-wrap: wrap;
