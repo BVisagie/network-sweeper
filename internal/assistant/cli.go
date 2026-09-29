@@ -21,9 +21,12 @@ const outputCap = 1 << 20
 // temp directory, with the transcript on stdin.
 type cliBackend struct {
 	id, label, name, override, note string
-	// prepare checks this CLI version can be locked down, and returns the
-	// arguments for one turn. out is a file the CLI may write its reply to.
-	prepare func(ctx context.Context, run runner, out string) ([]string, error)
+	// check, when set, confirms this CLI version can be locked down. It runs
+	// when detecting the backend and again before every turn.
+	check func(ctx context.Context, run runner) error
+	// args returns the arguments for one turn. out is a file the CLI may
+	// write its reply to.
+	args func(run runner, out string) []string
 	// parse turns stdout (or the out file's content) into the reply.
 	parse func(stdout, outFile []byte) (string, error)
 }
@@ -32,9 +35,9 @@ func (s *Service) claude() *cliBackend {
 	return &cliBackend{
 		id: "claude", label: "Claude CLI", name: "claude", override: s.opt.ClaudePath,
 		note: "Sends what you share to Anthropic under your Claude login. All of its tools are switched off.",
-		prepare: func(context.Context, runner, string) ([]string, error) {
+		args: func(runner, string) []string {
 			// --tools "" removes every tool, so the model can only answer in text.
-			return []string{"-p", "--tools", "", "--strict-mcp-config", "--no-session-persistence", "--output-format", "json"}, nil
+			return []string{"-p", "--tools", "", "--strict-mcp-config", "--no-session-persistence", "--output-format", "json"}
 		},
 		parse: parseClaude,
 	}
@@ -43,8 +46,9 @@ func (s *Service) claude() *cliBackend {
 func (s *Service) codex() *cliBackend {
 	return &cliBackend{
 		id: "codex", label: "Codex CLI", name: "codex", override: s.opt.CodexPath,
-		note:    "Sends what you share to OpenAI under your Codex login. Its shell and other tools are switched off.",
-		prepare: prepareCodex,
+		note:  "Sends what you share to OpenAI under your Codex login. Its shell and other tools are switched off.",
+		check: checkCodex,
+		args:  codexArgs,
 		parse: func(_, outFile []byte) (string, error) {
 			if r := strings.TrimSpace(string(outFile)); r != "" {
 				return r, nil
@@ -73,10 +77,10 @@ func parseClaude(stdout, _ []byte) (string, error) {
 // renamed switch can never silently leave a tool on.
 var codexOff = []string{"shell_tool", "unified_exec", "code_mode_host", "browser_use", "computer_use", "in_app_browser", "apps", "plugins"}
 
-func prepareCodex(ctx context.Context, run runner, out string) ([]string, error) {
+func checkCodex(ctx context.Context, run runner) error {
 	listed, err := run.output(ctx, 20*time.Second, "features", "list")
 	if err != nil {
-		return nil, fmt.Errorf("could not list Codex features: %v", err)
+		return fmt.Errorf("could not list Codex features: %v", err)
 	}
 	known := map[string]bool{}
 	for _, line := range strings.Split(string(listed), "\n") {
@@ -84,15 +88,21 @@ func prepareCodex(ctx context.Context, run runner, out string) ([]string, error)
 			known[f[0]] = true
 		}
 	}
+	for _, f := range codexOff {
+		if !known[f] {
+			return fmt.Errorf("this Codex version has no %q switch, so its tools cannot be verified as off; update Network Sweeper or use another backend", f)
+		}
+	}
+	return nil
+}
+
+func codexArgs(run runner, out string) []string {
 	args := []string{"exec", "--sandbox", "read-only", "--ephemeral", "--skip-git-repo-check",
 		"-c", "mcp_servers={}", "-c", `web_search="disabled"`}
 	for _, f := range codexOff {
-		if !known[f] {
-			return nil, fmt.Errorf("this Codex version has no %q switch, so its tools cannot be verified as off; update Network Sweeper or use another backend", f)
-		}
 		args = append(args, "--disable", f)
 	}
-	return append(args, "-C", run.dir, "--output-last-message", out, "-"), nil
+	return append(args, "-C", run.dir, "--output-last-message", out, "-")
 }
 
 func (b *cliBackend) status(ctx context.Context) Status {
@@ -109,6 +119,12 @@ func (b *cliBackend) status(ctx context.Context) Status {
 		return st
 	}
 	st.Version = firstLine(string(v))
+	if b.check != nil {
+		if err := b.check(ctx, run); err != nil {
+			st.Reason = err.Error()
+			return st
+		}
+	}
 	st.Available = true
 	return st
 }
@@ -119,13 +135,17 @@ func (b *cliBackend) ask(ctx context.Context, text string) (string, error) {
 		return "", err
 	}
 	defer run.close()
-	out := filepath.Join(run.dir, "reply.txt")
-	args, err := b.prepare(ctx, run, out)
-	if err != nil {
-		return "", err
+	if b.check != nil {
+		if err := b.check(ctx, run); err != nil {
+			return "", err
+		}
 	}
-	stdout, err := run.exec(ctx, text, args...)
-	file, _ := os.ReadFile(out)
+	out := filepath.Join(run.dir, "reply.txt")
+	stdout, err := run.exec(ctx, text, b.args(run, out)...)
+	file, ferr := readCapped(out)
+	if ferr != nil {
+		return "", ferr
+	}
 	if err != nil {
 		// Claude reports errors such as "Not logged in" in its JSON result.
 		if _, perr := b.parse(stdout, file); perr != nil && len(stdout) > 0 && b.id == "claude" {
@@ -134,6 +154,24 @@ func (b *cliBackend) ask(ctx context.Context, text string) (string, error) {
 		return "", err
 	}
 	return b.parse(stdout, file)
+}
+
+// readCapped reads a reply file the CLI wrote, refusing one over outputCap.
+// A missing file means no reply.
+func readCapped(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, nil
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, outputCap+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(b) > outputCap {
+		return nil, errors.New("the reply was larger than 1 MiB and was discarded")
+	}
+	return b, nil
 }
 
 // runner runs one CLI binary as the child identity in its own temp dir.
@@ -179,8 +217,17 @@ func (r runner) exec(ctx context.Context, stdin string, args ...string) ([]byte,
 	var stdout, stderr capped
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	cmd.WaitDelay = 5 * time.Second
-	r.id.apply(cmd)
-	err := cmd.Run()
+	tree := r.id.apply(cmd)
+	defer tree.close()
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("%s did not start: %v", filepath.Base(r.bin), err)
+	}
+	if err := tree.started(cmd); err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return nil, err
+	}
+	err := cmd.Wait()
 	if ctx.Err() != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return nil, errors.New("the AI took too long and was stopped")
@@ -213,8 +260,6 @@ func (c *capped) Write(p []byte) (int, error) {
 	}
 	return len(p), nil
 }
-
-var _ io.Writer = (*capped)(nil)
 
 // findBinary looks on PATH, then in the usual per-user install folders of the
 // invoking user (sudo resets PATH).

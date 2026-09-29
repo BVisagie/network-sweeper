@@ -53,9 +53,16 @@ func resolveChild(euid int, getenv func(string) string, lookup func(string) (*us
 	return &childID{cred: cred, home: u.HomeDir, user: u.Username}, nil
 }
 
+// tree contains a CLI and everything it starts. On Unix the process group
+// does that, set up before start.
+type tree struct{}
+
+func (*tree) started(*exec.Cmd) error { return nil }
+func (*tree) close()                  {}
+
 // apply runs the command in its own process group, as the child identity,
 // and kills the whole group when the request is stopped.
-func (c *childID) apply(cmd *exec.Cmd) {
+func (c *childID) apply(cmd *exec.Cmd) *tree {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Credential: c.cred}
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {
@@ -63,6 +70,7 @@ func (c *childID) apply(cmd *exec.Cmd) {
 		}
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
+	return &tree{}
 }
 
 func (c *childID) chown(path string) error {

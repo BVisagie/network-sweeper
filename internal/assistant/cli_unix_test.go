@@ -54,7 +54,11 @@ func TestCodexRefusesWhenAToolSwitchIsMissing(t *testing.T) {
 	// This Codex knows every switch except shell_tool.
 	features := strings.Join([]string{"unified_exec", "code_mode_host", "browser_use", "computer_use", "in_app_browser", "apps", "plugins"}, " stable false\\n")
 	bin, argsFile, _ := fakeCLI(t, "codex", `printf '`+features+` stable false\n'`)
-	_, err := New(Options{CodexPath: bin}).Ask(context.Background(), Request{Backend: "codex", Prompt: "p"})
+	s := New(Options{CodexPath: bin})
+	if st := s.Statuses(context.Background(), "")[1]; st.ID != "codex" || st.Available || !strings.Contains(st.Reason, "shell_tool") {
+		t.Errorf("status = %+v, want codex unavailable naming shell_tool", st)
+	}
+	_, err := s.Ask(context.Background(), Request{Backend: "codex", Prompt: "p"})
 	if err == nil || !strings.Contains(err.Error(), "shell_tool") {
 		t.Fatalf("err = %v, want a refusal naming shell_tool", err)
 	}
