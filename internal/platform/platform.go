@@ -51,6 +51,7 @@ func Snapshot(elevated bool) Info {
 		{Name: "SSDP/UPnP inventory hints", Status: "full", Detail: "Multicast M-SEARCH; attaches friendlyName only to already-discovered hosts; educational UPnP finding."},
 		{Name: "SNMP soft probe (public)", Status: "full", Detail: "Single community \"public\" GET for sysName/sysDescr; educational finding if it answers — no brute force."},
 		{Name: "Saved history and comparisons", Status: "full", Detail: "Scans, device names/notes/tags, and finding reviews are kept in a per-user folder (memory only with --ephemeral, or on elevated Linux/macOS runs unless --data-dir is set). Absence is reported as not observed."},
+		{Name: "AI analysis chat", Status: "full", Detail: "Claude or Codex CLI (every tool off, never run as root: under sudo they run as your user) or a model server on this computer. Network Sweeper itself calls no AI service."},
 		{Name: "SYN / raw half-open scan", Status: "unavailable", Detail: "Not available; TCP connect only."},
 		{Name: "Hosts behind AP / client isolation", Status: "unavailable", Detail: "Peers are hidden by the access point."},
 		{Name: "Other VLANs / guest Wi‑Fi", Status: "unavailable", Detail: "Only attached L2/L3 segments are visible."},

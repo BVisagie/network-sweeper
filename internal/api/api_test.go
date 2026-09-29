@@ -171,3 +171,16 @@ func TestReserveScanAdmitsOne(t *testing.T) {
 		t.Fatalf("admitted %d scans, want 1", n)
 	}
 }
+
+func TestDeleteHistoryRefusedWhileScanning(t *testing.T) {
+	s := New(testFS(), false)
+	s.BaseURL = "http://127.0.0.1:12345"
+	s.scanRunning = true
+	req := httptest.NewRequest(http.MethodPost, "/api/history/delete", strings.NewReader(`{"what":"all"}`))
+	req.Header.Set(TokenHeader, s.Token)
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected 409 while a scan runs, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}

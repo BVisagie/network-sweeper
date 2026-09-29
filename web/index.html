@@ -63,6 +63,7 @@
         <button type="button" role="tab" id="tabbtn-devices" data-tab="devices" class="active" aria-selected="true" aria-controls="tab-devices">Devices</button>
         <button type="button" role="tab" id="tabbtn-changes" data-tab="changes" aria-selected="false" aria-controls="tab-changes" tabindex="-1">Changes</button>
         <button type="button" role="tab" id="tabbtn-findings" data-tab="findings" aria-selected="false" aria-controls="tab-findings" tabindex="-1">Findings</button>
+        <button type="button" role="tab" id="tabbtn-analyze" data-tab="analyze" aria-selected="false" aria-controls="tab-analyze" tabindex="-1" hidden>Analyze</button>
         <button type="button" role="tab" id="tabbtn-settings" data-tab="settings" aria-selected="false" aria-controls="tab-settings" tabindex="-1">Settings</button>
       </nav>
 
@@ -86,7 +87,10 @@
               <div class="scan-actions">
                 <button id="scan-btn" class="primary large">Scan</button>
                 <button id="stop-btn" class="ghost" hidden>Stop</button>
-                <button id="analyze-btn" class="ghost" type="button" hidden>Analyze with AI</button>
+                <button id="analyze-btn" class="ai-cta" type="button" hidden>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2.5l1.9 5.6 5.6 1.9-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.9L12 2.5zm6.5 11l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9.9-2.6z"/></svg>
+                  Analyze with AI
+                </button>
               </div>
               <label class="check deep-check" id="deep-label">
                 <input type="checkbox" id="deep" />
@@ -98,6 +102,7 @@
               </label>
             </div>
 
+            <p id="scan-locked" class="muted small" hidden>Scan settings are locked while a scan runs. Stop it to change them.</p>
             <p id="preview" class="preview" aria-live="polite"></p>
             <p id="scan-status" class="status-line" aria-live="polite"></p>
             <div id="progress" class="progress" hidden>
@@ -198,6 +203,99 @@
         </div>
       </section>
 
+      <section id="tab-analyze" class="tab" role="tabpanel" hidden aria-labelledby="tabbtn-analyze">
+        <div class="analyze-head">
+          <h2 id="ai-title">Analyze with AI</h2>
+          <p class="help">Get a plain-language review of this scan, and advice on protecting your network, from an AI you choose. It will probably ask you a few questions about your network first.</p>
+          <div id="ai-scan-note" class="banner is-warn ai-scan-note" hidden>
+            <span id="ai-scan-note-text"></span>
+            <button type="button" class="ghost compact" id="ai-rescan">Scan again</button>
+          </div>
+        </div>
+        <div class="ai-setup-bar" id="ai-setup-bar" hidden>
+          <span><span class="ai-ok" aria-hidden="true">✓</span> <span id="ai-setup-text"></span></span>
+          <button type="button" class="text-link" id="ai-setup-toggle">View setup and prompt</button>
+        </div>
+        <div class="analyze-grid">
+          <div class="analyze-side">
+            <div class="panel ai-p-devices" id="ai-devices-panel" hidden>
+              <div class="panel-head"><h3>Devices in this analysis <span id="ai-dev-count" class="count-pill">0</span></h3></div>
+              <div class="panel-body ai-dev-filter">
+                <label class="field compact grow"><span class="sr-only">Filter devices</span><input id="ai-dev-filter" type="search" placeholder="Filter by reference, name, IP, vendor…" autocomplete="off" /></label>
+                <p class="muted small">Names here stay on this computer: the AI only sees the references. Click a device for its details; ↵ mentions it in your reply.</p>
+              </div>
+              <div class="ai-dev-list" id="ai-dev-list"></div>
+            </div>
+
+            <div class="panel ai-p-consent">
+              <div class="panel-head"><h3>Before you share</h3></div>
+              <div class="panel-body ai-stack" id="ai-consent">
+                <p class="banner is-warn">What you share describes your network: its devices, open services, software versions, and possible weak spots. AI services may keep it, log it, or train on it. The Claude and Codex CLIs send it to Anthropic or OpenAI under your account; a local model server keeps it on this computer. Network Sweeper sends nothing on its own. Sharing is at your own risk.</p>
+                <div class="ai-masks">
+                  <label class="check inline"><input type="checkbox" id="ai-mask-macs" checked /><span>Mask MAC addresses</span></label>
+                  <label class="check inline"><input type="checkbox" id="ai-mask-names" checked /><span>Mask names, hostnames, tags, and notes</span></label>
+                </div>
+                <p class="muted small">Masking keeps IP addresses, vendors, services, and findings, which the AI needs.</p>
+                <label class="check inline ai-ack"><input type="checkbox" id="ai-ack" /><span>I understand the risk of sharing this.</span></label>
+              </div>
+              <div class="panel-body ai-consent-summary" id="ai-consent-summary" hidden>
+                <p><span class="ai-ok" aria-hidden="true">✓</span> <span id="ai-consent-text"></span></p>
+                <button type="button" class="text-link" id="ai-consent-edit">Change</button>
+              </div>
+            </div>
+
+            <div class="panel ai-p-backend">
+              <div class="panel-head"><h3>AI to ask</h3></div>
+              <div class="panel-body ai-stack">
+                <fieldset class="ai-backends" id="ai-backends"><legend class="sr-only">AI to ask</legend><p class="muted small">Checking what is installed…</p></fieldset>
+                <div class="ai-local" id="ai-local" hidden>
+                  <label class="field compact grow"><span>Server</span><input id="ai-local-url" type="text" spellcheck="false" autocomplete="off" placeholder="http://127.0.0.1:8080" /></label>
+                  <label class="field compact"><span>Model</span><select id="ai-local-model"><option value="">Server default</option></select></label>
+                  <button type="button" class="ghost compact" id="ai-local-check">Check</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel ai-p-prompt">
+              <div class="panel-head"><h3>Prompt</h3><span id="ai-stats" class="muted small"></span></div>
+              <div class="panel-body ai-stack">
+                <details class="ai-prompt-details" id="ai-prompt-details">
+                  <summary>Review or edit what will be shared</summary>
+                  <textarea id="ai-prompt" class="ai-prompt" rows="14" spellcheck="false" aria-label="Prompt" disabled>Building the prompt…</textarea>
+                </details>
+                <p class="muted small">Using another AI? Copy the prompt and paste it into any capable chat.</p>
+                <div class="form-actions">
+                  <button type="button" class="ghost compact" id="ai-copy" disabled>Copy prompt</button>
+                  <button type="button" class="ghost compact" id="ai-download" disabled>Download .md</button>
+                  <span id="ai-status" class="status-line" aria-live="polite"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel ai-conversation">
+            <div class="panel-head">
+              <h3>Conversation <span id="ai-with" class="muted small"></span></h3>
+              <div class="head-actions">
+                <button type="button" class="ghost compact" id="ai-copy-chat" hidden>Copy</button>
+                <button type="button" class="ghost compact" id="ai-reset" hidden>Start over</button>
+              </div>
+            </div>
+            <div id="ai-thread" class="ai-thread" aria-live="polite"></div>
+            <div class="ai-composer" id="ai-composer" hidden>
+              <p id="ai-note" class="banner is-warn" hidden></p>
+              <label class="field" id="ai-reply-wrap" hidden><span class="sr-only">Your reply</span><textarea id="ai-reply" rows="3" maxlength="20000" placeholder="Answer the questions, or ask for the assessment…"></textarea></label>
+              <div class="form-actions">
+                <button type="button" class="primary" id="ai-send" disabled>Send</button>
+                <button type="button" class="ghost" id="ai-stop" hidden>Stop</button>
+                <span id="ai-chat-status" class="status-line" aria-live="polite"></span>
+                <span class="muted small ai-hint" id="ai-hint" hidden>Ctrl+Enter to send</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section id="tab-settings" class="tab" role="tabpanel" hidden aria-labelledby="tabbtn-settings">
         <div class="panel">
           <div class="panel-head">
@@ -244,6 +342,7 @@
               <button id="delete-history" class="ghost" type="button">Delete scan history</button>
               <button id="delete-all" class="ghost danger" type="button">Delete all saved data</button>
             </div>
+            <p id="data-locked" class="muted small" hidden>Deleting is unavailable while a scan runs.</p>
             <p id="data-result" class="status-line" aria-live="polite"></p>
           </div>
         </div>

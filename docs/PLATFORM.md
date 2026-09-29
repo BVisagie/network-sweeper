@@ -20,6 +20,7 @@ Legend: **Available** = works with current privileges · **Needs elevation** = f
 - Saved history: scans, device names/notes/tags, and finding reviews in a per-user data folder (see below), with comparisons between scans of the same network
 - Target preview: ranges are deduplicated and sized before a scan; selections over 1,024 addresses are refused rather than cut short
 - Hardened local API (ephemeral port, per-launch token, Origin checks)
+- AI analysis: a copyable prompt, or a chat with the Claude CLI, the Codex CLI (both with every tool off), or a loopback model server. Under sudo on Linux/macOS, the CLIs run as the invoking user; root without sudo can use only the local model server
 - Server-side default restriction to detected local subnets
 
 ### Elevated / partial

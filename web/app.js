@@ -289,6 +289,7 @@
         headers: { "X-NetworkSweeper-Token": TOKEN, "Content-Type": "application/json", ...(opts.headers || {}) },
       });
     } catch (e) {
+      if (e.name === "AbortError") throw e; // stopped on purpose
       setDisconnected(true);
       throw new Error("Network Sweeper is not reachable.");
     }
@@ -367,12 +368,16 @@
     });
     if (focus) document.getElementById("tabbtn-" + id)?.focus();
     if (id === "changes") loadChanges();
+    if (id === "analyze") {
+      $("tabbtn-analyze").classList.remove("has-news");
+      aiOpen();
+    }
   }
 
   document.querySelectorAll(".tabs button").forEach((btn) => {
     btn.addEventListener("click", () => activateTab(btn.dataset.tab));
     btn.addEventListener("keydown", (e) => {
-      const tabs = [...document.querySelectorAll(".tabs button")];
+      const tabs = [...document.querySelectorAll(".tabs button")].filter((b) => !b.hidden);
       const i = tabs.indexOf(btn);
       let next = -1;
       if (e.key === "ArrowRight") next = (i + 1) % tabs.length;
@@ -573,7 +578,9 @@
   function syncScanButton() {
     const running = !!state.polling;
     $("scan-btn").disabled = running || !(state.preview && state.preview.ok);
+    $("scan-btn").textContent = running ? "Scanning…" : "Scan";
     $("analyze-btn").hidden = running || !state.inv?.latestScan;
+    syncAnalyzeTab();
   }
 
   $("targets").addEventListener("input", updatePreview);
@@ -584,6 +591,13 @@
   function setScanning(running) {
     $("stop-btn").hidden = !running;
     $("progress").hidden = !running;
+    // A scan's ranges and options are fixed once it starts, and deleting
+    // history under it would lose it: lock those controls until it ends.
+    // (Disabling the fieldset keeps each too-large subnet's own disabled flag.)
+    document.querySelector("fieldset.scope").disabled = running;
+    ["deep", "custom-optin", "delete-history", "delete-all"].forEach((id) => ($(id).disabled = running));
+    $("scan-locked").hidden = !running;
+    $("data-locked").hidden = !running;
     if (running) {
       state.lastPct = 0;
       $("progress-bar").style.width = "0%";
@@ -687,6 +701,7 @@
       $("profile-select").value = ""; // show the network just scanned
       await refreshAll();
       state.justScanned = false;
+      aiNudge();
       if (state.currentDeviceId && !$("modal").hidden) openDevice(state.currentDeviceId, false);
     }, 700);
     syncScanButton();
@@ -1036,7 +1051,7 @@
           <label class="field"><span>Notes</span><textarea id="a-notes" rows="3" maxlength="4000">${escapeHtml(d.notes || "")}</textarea></label>
           <div class="form-actions">
             <button type="submit" class="primary">Save notes</button>
-            <button type="button" class="ghost" id="rescan-device" ${devIP(d) ? "" : "disabled"}>Rescan this device</button>
+            <button type="button" class="ghost" id="rescan-device" ${devIP(d) && !state.polling ? "" : "disabled"}${state.polling ? ` title="A scan is running."` : ""}>Rescan this device</button>
             <span id="annotate-status" class="status-line" aria-live="polite"></span>
           </div>
         </form>
@@ -1556,80 +1571,552 @@
 
   // ---------- AI analysis ----------
 
-  // Shows a prompt, for any AI model, built from the latest scan. Nothing is
-  // sent from here: the user reads the risk notice, then copies or saves it.
-  function openAnalysis() {
+  // The Analyze tab builds a prompt from the latest scan. After the user
+  // acknowledges the risk, it can be copied, or sent to an AI on this
+  // computer (the Claude or Codex CLI with tools off, or a local model
+  // server). The conversation lives here until the page is reloaded.
+
+  const AI_BACKEND_KEY = "ns-ai-backend";
+  const AI_LOCAL_KEY = "ns-ai-local-url";
+
+  const ai = {
+    bound: false,
+    counts: null, // prompt stats; null while the prompt is loading
+    seq: 0,
+    scanKey: "", // profile and scan the prompt was built from; "" to rebuild
+    promptScan: null, // that scan, which the heading describes during a conversation
+    backendSeq: 0,
+    startError: "", // why the first send failed, shown where Start is
+    key: null, // which device and MAC each prompt reference stands for
+    snap: null, // those devices as they were when the conversation started
+    showSetup: false, // during a conversation: setup panels instead of devices
+    backends: [],
+    backendsLoaded: false,
+    backend: "",
+    consentOpen: true,
+    prompt: "", // fixed at the first send
+    history: [], // assistant replies and the owner's answers, alternating
+    ctrl: null,
+    started: 0,
+    timer: null,
+  };
+
+  function remembered(key, fallback = "") {
+    try {
+      return localStorage.getItem(key) || fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  function remember(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+      // per-viewer convenience only
+    }
+  }
+
+  const aiTalking = () => ai.history.length > 0 || !!ai.ctrl;
+  const aiBackend = () => ai.backends.find((b) => b.id === ai.backend);
+  const aiScanKey = () => (state.inv?.latestScan ? (state.inv.profileId || "") + "|" + state.inv.latestScan.id : "");
+
+  // Keeps the tab in step with the inventory: shown once a scan exists, and
+  // its prompt rebuilt for a newer scan unless a conversation is under way.
+  function syncAnalyzeTab() {
     const latest = state.inv?.latestScan;
-    if (!latest) return;
-    const html = `
-      <p class="banner is-warn">This prompt describes your network: its devices, open services, software versions, and possible weak spots. AI services may keep what you paste, log it, or train on it. Network Sweeper sends nothing itself. Masking hides MAC addresses, names, tags, and notes, but IP addresses, vendors, and services stay. A model on your own computer, or a provider you trust, is safest. Sharing it is at your own risk.</p>
-      <section class="detail-section ai-analysis">
-        <label class="check"><input type="checkbox" id="ai-ack" /><span>I understand the risk of sharing this.</span></label>
-        <div class="ai-masks">
-          <label class="check inline"><input type="checkbox" id="ai-mask-macs" checked /><span>Mask MAC addresses</span></label>
-          <label class="check inline"><input type="checkbox" id="ai-mask-names" checked /><span>Mask device names, hostnames, tags, and notes</span></label>
-        </div>
-        <label class="field"><span>Prompt <small class="muted">(unlocks once you tick the box above; you can edit it, and changing a mask rebuilds it)</small></span>
-          <textarea id="ai-prompt" class="ai-prompt" rows="14" spellcheck="false" disabled>Building the prompt…</textarea></label>
-        <p id="ai-stats" class="muted small"></p>
-        <p class="help">Paste it into any capable AI chat. The model will probably ask you a few questions about your network first; answering them gets you better advice. Take care what you share in those answers too.</p>
-        <div class="form-actions">
-          <button type="button" class="primary" id="ai-copy" disabled>Copy prompt</button>
-          <button type="button" class="ghost" id="ai-download" disabled>Download .md</button>
-          <span id="ai-status" class="status-line" aria-live="polite"></span>
-        </div>
-      </section>`;
-    openModal(`Analyze with AI · scan of ${fmtTime(latest.finishedAt)}`, "", html);
+    const btn = $("tabbtn-analyze");
+    btn.hidden = !latest && !aiTalking();
+    if (btn.hidden && !$("tab-analyze").hidden) activateTab("devices", false);
+    // A conversation stays about the scan it started from until Start over.
+    const scan = (aiTalking() && ai.promptScan) || latest;
+    if (scan) $("ai-title").textContent = `Analyze with AI · scan of ${fmtTime(scan.finishedAt)}`;
+    // Old or partial data gives old or partial advice: say so, and offer a rescan.
+    const notes = [];
+    if (scan && Date.now() - new Date(scan.finishedAt).getTime() > STALE_MS) {
+      notes.push(`This scan is from ${ago(scan.finishedAt)}, so devices and services may have changed since.`);
+    }
+    if (scan?.partial) {
+      const how = scan.state === "timed_out" ? "hit the time limit" : scan.state === "failed" ? "failed" : "was stopped early";
+      notes.push(`It ${how}, so some devices may not have been checked.`);
+    }
+    $("ai-scan-note").hidden = !notes.length;
+    $("ai-scan-note-text").textContent = notes.length ? notes.join(" ") + " Scan again for a current picture." : "";
+    if (!$("tab-analyze").hidden) aiRefreshPrompt();
+    aiSync();
+  }
+
+  function aiOpen() {
+    aiBind();
+    if (!ai.backendsLoaded) aiLoadBackends();
+    aiRefreshPrompt();
+    aiSync();
+    aiRenderThread();
+    requestAnimationFrame(aiReveal);
+  }
+
+  function aiRefreshPrompt() {
+    const key = aiScanKey();
+    if (!key || key === ai.scanKey || aiTalking()) return;
+    aiUsePrompt();
+  }
+
+  // aiUsePrompt builds the prompt from the latest scan, with the current masks.
+  function aiUsePrompt() {
+    ai.scanKey = aiScanKey();
+    ai.promptScan = state.inv?.latestScan || null;
+    aiLoadPrompt();
+  }
+
+  async function aiLoadPrompt() {
+    const mine = ++ai.seq;
+    ai.counts = null;
+    aiSync();
+    const q = new URLSearchParams({ maskMacs: $("ai-mask-macs").checked ? "1" : "0", maskNames: $("ai-mask-names").checked ? "1" : "0" });
+    if (state.inv?.profileId) q.set("profile", state.inv.profileId);
+    try {
+      const res = await api("/api/analysis-prompt?" + q);
+      if (mine !== ai.seq) return;
+      $("ai-prompt").value = res.prompt;
+      ai.counts = res.stats;
+      ai.key = res.key || null;
+      $("ai-status").textContent = "";
+    } catch (e) {
+      if (mine !== ai.seq) return;
+      ai.scanKey = ""; // try again on the next refresh
+      $("ai-prompt").value = "";
+      $("ai-status").textContent = "Could not build the prompt: " + e.message;
+    }
+    aiSync();
+  }
+
+  async function aiLoadBackends() {
+    // Only the newest check counts, so an older one cannot report on a
+    // server address that has since changed.
+    const mine = ++ai.backendSeq;
+    ai.backendsLoaded = true;
+    try {
+      const res = await api("/api/assistant?localUrl=" + encodeURIComponent($("ai-local-url").value.trim()));
+      if (mine !== ai.backendSeq) return;
+      ai.backends = res.backends || [];
+    } catch (e) {
+      if (mine !== ai.backendSeq) return;
+      $("ai-backends").innerHTML = `<legend class="sr-only">AI to ask</legend><p class="muted small">${escapeHtml("Could not check for AI tools: " + e.message)}</p>`;
+      ai.backendsLoaded = false;
+      return;
+    }
+    if (!ai.backends.some((b) => b.id === ai.backend && (b.available || b.id === "local"))) {
+      ai.backend = (ai.backends.find((b) => b.available) || ai.backends.find((b) => b.id === "local") || {}).id || "";
+    }
+    aiRenderBackends();
+  }
+
+  function aiRenderBackends() {
+    $("ai-backends").innerHTML =
+      `<legend class="sr-only">AI to ask</legend>` +
+      ai.backends
+        .map(
+          (b) => `<label class="ai-backend${b.available ? "" : " is-off"}">
+            <input type="radio" name="ai-backend" value="${escapeHtml(b.id)}" ${b.id === ai.backend ? "checked" : ""} />
+            <span class="ai-backend-text">
+              <span class="ai-backend-name">${escapeHtml(b.label)}${b.version ? ` <span class="muted mono">${escapeHtml(b.version.replace(/\s*\(.*\)$/, ""))}</span>` : ""}</span>
+              <small class="${b.available ? "muted" : "ai-unavailable"}">${escapeHtml(b.available ? b.note : b.reason || "Not available.")}</small>
+            </span>
+          </label>`
+        )
+        .join("");
+    $("ai-backends")
+      .querySelectorAll('input[name="ai-backend"]')
+      .forEach((r) =>
+        r.addEventListener("change", () => {
+          ai.backend = r.value;
+          remember(AI_BACKEND_KEY, r.value);
+          aiSync();
+        })
+      );
+    const local = ai.backends.find((b) => b.id === "local");
+    const sel = $("ai-local-model");
+    const keep = sel.value;
+    sel.innerHTML =
+      `<option value="">Server default</option>` + (local?.models || []).map((m) => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
+    // Pick a listed model unless one was chosen: Ollama needs a model name.
+    if (keep && [...sel.options].some((o) => o.value === keep)) sel.value = keep;
+    else if (local?.models?.length) sel.value = local.models[0];
+    aiSync();
+  }
+
+  function aiSync() {
+    if (!ai.bound) return;
+    const ack = $("ai-ack").checked;
+    const ok = !!ai.counts && ack;
+    const busy = !!ai.ctrl;
+    const talking = aiTalking();
+    const b = aiBackend();
+    const macs = $("ai-mask-macs").checked;
+    const names = $("ai-mask-names").checked;
+
+    // Once acknowledged, the notice folds into one line.
+    const folded = ack && !ai.consentOpen;
+    $("ai-consent").hidden = folded;
+    $("ai-consent-summary").hidden = !folded;
+    $("ai-consent-text").textContent = `Risk acknowledged · MACs ${macs ? "masked" : "shown"} · names ${names ? "masked" : "shown"}`;
+    $("ai-mask-macs").disabled = talking;
+    $("ai-mask-names").disabled = talking;
 
     const area = $("ai-prompt");
-    const status = $("ai-status");
-    let counts = null;
-    let seq = 0;
-    const sync = () => {
-      // The prompt stays locked (no selecting, editing or copying by hand)
-      // until the risk is acknowledged.
-      const ok = !!counts && $("ai-ack").checked;
-      area.disabled = !ok;
-      $("ai-copy").disabled = !ok;
-      $("ai-download").disabled = !ok;
-      $("ai-stats").textContent = counts
-        ? `About ${fmtNumber(Math.ceil(area.value.length / 4))} tokens · ${plural(counts.devices, "device")} · ${plural(counts.findings, "finding")}`
-        : "";
-    };
-    const load = async () => {
-      const mine = ++seq;
-      counts = null;
-      sync();
-      const q = new URLSearchParams({ maskMacs: $("ai-mask-macs").checked ? "1" : "0", maskNames: $("ai-mask-names").checked ? "1" : "0" });
-      if (state.inv.profileId) q.set("profile", state.inv.profileId);
-      try {
-        const res = await api("/api/analysis-prompt?" + q);
-        if (mine !== seq || !document.contains(area)) return;
-        area.value = res.prompt;
-        counts = res.stats;
-        status.textContent = "";
-      } catch (e) {
-        if (mine !== seq || !document.contains(area)) return;
-        area.value = "";
-        status.textContent = "Could not build the prompt: " + e.message;
+    area.disabled = !ok || talking;
+    $("ai-copy").disabled = !ok;
+    $("ai-download").disabled = !ok;
+    $("ai-stats").textContent = ai.counts
+      ? `≈${fmtNumber(Math.ceil(area.value.length / 4))} tokens · ${plural(ai.counts.devices, "device")} · ${plural(ai.counts.findings, "finding")}`
+      : "";
+
+    document.querySelectorAll('input[name="ai-backend"]').forEach((r) => {
+      const info = ai.backends.find((x) => x.id === r.value);
+      r.disabled = talking || !(info?.available || info?.id === "local");
+    });
+    $("ai-local").hidden = ai.backend !== "local";
+    ["ai-local-url", "ai-local-model", "ai-local-check"].forEach((id) => ($(id).disabled = talking));
+
+    const replying = ai.history.length > 0;
+    $("ai-reply-wrap").hidden = !replying;
+    $("ai-reply").disabled = !ok || busy;
+    $("ai-hint").hidden = !replying || busy;
+    // During a conversation the left column lists the devices it is about;
+    // the locked setup folds into one line above, and can still be viewed.
+    const setupShown = !talking || ai.showSetup;
+    document.querySelectorAll(".ai-p-consent, .ai-p-backend, .ai-p-prompt").forEach((p) => (p.hidden = !setupShown));
+    $("ai-devices-panel").hidden = setupShown;
+    $("ai-setup-bar").hidden = !talking;
+    $("ai-setup-text").textContent = `${b?.label || "AI"} · MACs ${macs ? "masked" : "shown"} · names ${names ? "masked" : "shown"}`;
+    $("ai-setup-toggle").textContent = ai.showSetup ? "Back to devices" : "View setup and prompt";
+
+    // Before the first reply, Start sits in the middle of the conversation;
+    // the composer below appears once there is something to answer.
+    $("ai-composer").hidden = !talking;
+    $("ai-thread").closest(".ai-conversation").classList.toggle("is-talking", talking);
+    $("ai-send").hidden = !replying;
+    $("ai-send").disabled = !ok || busy || !b?.available || !$("ai-reply").value.trim();
+    $("ai-stop").hidden = !busy;
+    $("ai-copy-chat").hidden = !replying;
+    $("ai-reset").hidden = !replying || busy;
+    $("ai-with").textContent = talking && b ? "· " + b.label : "";
+
+    const key = aiScanKey();
+    const moved = talking && ai.scanKey && key && key !== ai.scanKey;
+    $("ai-note").hidden = !moved;
+    if (moved) {
+      const latest = state.inv.latestScan;
+      $("ai-note").textContent =
+        key.split("|")[0] === ai.scanKey.split("|")[0]
+          ? `A newer scan (${fmtTime(latest.finishedAt)}) is available. This conversation is about the earlier one; Start over to analyze the new scan.`
+          : "Another network is selected. This conversation is about the earlier one; Start over to analyze the selected network.";
+    }
+    if (!talking) aiRenderThread();
+  }
+
+  function aiRenderThread() {
+    const thread = $("ai-thread");
+    const b = aiBackend();
+    if (!aiTalking()) {
+      let text;
+      let ready = false;
+      if (!$("ai-ack").checked) text = "Read the notice on the left, choose what to mask, then tick “I understand the risk” to begin.";
+      else if (!ai.counts) text = "Building the prompt…";
+      else if (!b?.available)
+        text = ai.backends.some((x) => x.available)
+          ? "Choose an AI on the left."
+          : "No AI was found on this computer. Install the Claude or Codex CLI, start a local model server, or copy the prompt into any AI chat.";
+      else {
+        ready = true;
+        text = `Sends the prompt (≈${fmtNumber(Math.ceil($("ai-prompt").value.length / 4))} tokens). It will probably ask you a few questions first; answer them here.`;
       }
-      sync();
+      thread.innerHTML = `<div class="ai-empty">
+        ${ai.startError ? `<p class="banner is-error">${escapeHtml(ai.startError)}</p>` : ""}
+        ${ready ? `<button type="button" class="primary large" id="ai-start">Start analysis with ${escapeHtml(b.label)}</button>` : ""}
+        <p>${escapeHtml(text)}</p>
+      </div>`;
+      return;
+    }
+    const who = b?.label || "AI";
+    const items = [`<div class="ai-msg ai-msg-user"><p class="ai-who">You</p><p class="muted small">Sent the prompt (≈${fmtNumber(Math.ceil(ai.prompt.length / 4))} tokens).</p></div>`];
+    for (const m of ai.history) {
+      items.push(
+        m.role === "assistant"
+          ? `<div class="ai-msg ai-msg-ai"><p class="ai-who">${escapeHtml(who)}</p><div class="ai-md">${aiLinkRefs(renderMarkdown(m.text))}</div></div>`
+          : `<div class="ai-msg ai-msg-user"><p class="ai-who">You</p><div class="ai-plain">${aiLinkRefs(escapeHtml(m.text))}</div></div>`
+      );
+    }
+    if (ai.ctrl) items.push(`<div class="ai-msg ai-msg-ai"><p class="ai-who">${escapeHtml(who)}</p><p class="muted small ai-wait" id="ai-wait">Thinking…</p></div>`);
+    thread.innerHTML = items.join("");
+    aiRenderDevices();
+    // Show a new reply from its first line; otherwise keep the latest in view.
+    const last = thread.lastElementChild;
+    if (!ai.ctrl && last?.classList.contains("ai-msg-ai")) thread.scrollTop = last.offsetTop - thread.offsetTop - 12;
+    else thread.scrollTop = thread.scrollHeight;
+  }
+
+  // renderMarkdown shows a reply's headings, lists, emphasis and code. The
+  // text is escaped first and only these fixed tags are added: no links, no
+  // images, no raw HTML.
+  function renderMarkdown(src) {
+    const inline = (s) =>
+      s
+        .split(/`([^`]+)`/)
+        .map((part, i) =>
+          i % 2
+            ? `<code>${part}</code>`
+            : part.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replace(/(^|[\s(])[*_]([^*_\s][^*_]*?)[*_](?=[\s).,:;!?]|$)/g, "$1<em>$2</em>")
+        )
+        .join("");
+    const out = [];
+    let para = [];
+    let list = null; // { tag, items: [] }
+    let code = null;
+    let table = null;
+    const flush = () => {
+      if (para.length) out.push(`<p>${inline(para.join(" "))}</p>`);
+      para = [];
+      if (list) out.push(`<${list.tag}>${list.items.map((it) => `<li>${inline(it)}</li>`).join("")}</${list.tag}>`);
+      list = null;
+      if (table) out.push(`<pre class="ai-table">${table.join("\n")}</pre>`);
+      table = null;
     };
-    $("ai-mask-macs").addEventListener("change", load);
-    $("ai-mask-names").addEventListener("change", load);
-    $("ai-ack").addEventListener("change", sync);
-    area.addEventListener("input", sync);
+    for (const line of escapeHtml(src).split("\n")) {
+      if (code) {
+        if (/^\s*```/.test(line)) {
+          out.push(`<pre><code>${code.join("\n")}</code></pre>`);
+          code = null;
+        } else code.push(line);
+        continue;
+      }
+      let m;
+      if (/^\s*```/.test(line)) {
+        flush();
+        code = [];
+      } else if (/^\s*\|/.test(line)) {
+        if (!table) flush();
+        (table ||= []).push(line.trim());
+      } else if ((m = line.match(/^(#{1,6})\s+(.*)$/))) {
+        flush();
+        out.push(`<h4 class="ai-h${Math.min(m[1].length, 3)}">${inline(m[2])}</h4>`);
+      } else if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) {
+        flush();
+      } else if ((m = line.match(/^\s*([-*+]|\d+[.)])\s+(.*)$/))) {
+        const tag = /\d/.test(m[1]) ? "ol" : "ul";
+        if (para.length || table || (list && list.tag !== tag && !/^\s{2,}/.test(line))) flush();
+        if (!list) list = { tag, items: [] };
+        list.items.push(m[2]);
+      } else if (!line.trim()) {
+        flush();
+      } else if (list && /^\s+\S/.test(line)) {
+        list.items[list.items.length - 1] += " " + line.trim();
+      } else {
+        if (list || table) flush();
+        para.push(line.trim());
+      }
+    }
+    if (code) out.push(`<pre><code>${code.join("\n")}</code></pre>`);
+    flush();
+    return out.join("");
+  }
+
+  // aiSnapshot records how each referenced device looks now, so the
+  // conversation keeps reading the same way even if a device is renamed.
+  function aiSnapshot() {
+    const byId = new Map(devices().map((d) => [d.id, d]));
+    const snap = { devices: new Map(), macs: new Map() };
+    for (const r of ai.key?.devices || []) {
+      const d = byId.get(r.deviceId);
+      const h = d?.last?.host || {};
+      const open = d ? openFindings(d) : [];
+      snap.devices.set(r.ref, {
+        ref: r.ref,
+        id: r.deviceId,
+        listed: r.listed,
+        // Your name, then hostname, then vendor: a service banner is a poor name.
+        name: d ? d.name || humanizeText(h.hostname || "") || h.vendor || devName(d) : "",
+        ip: d ? devIP(d) : "",
+        vendor: d?.last?.host?.vendor || "",
+        open: open.length,
+        worst: worstSeverity(open),
+      });
+    }
+    for (const m of ai.key?.macs || []) snap.macs.set(m.token, m.mac);
+    return snap;
+  }
+
+  const AI_REF = /\b(?:device|mac)-\d+\b/g;
+
+  // aiLinkRefs turns device-N and mac-N in rendered (already escaped) text
+  // into labelled chips. Unknown references stay as plain text.
+  function aiLinkRefs(html) {
+    if (!ai.snap) return html;
+    return html.replace(AI_REF, (ref) => {
+      const d = ai.snap.devices.get(ref);
+      if (d) {
+        const tip = [d.name && d.ip, d.vendor].filter(Boolean).join(" · ");
+        return `<button type="button" class="ai-ref" data-ref="${ref}" data-id="${escapeHtml(d.id)}"${tip ? ` title="${escapeHtml(tip)}"` : ""}>${ref}<span class="ai-ref-name"> · ${escapeHtml(d.name || d.ip || "unknown")}</span></button>`;
+      }
+      const mac = ai.snap.macs.get(ref);
+      return mac ? `<span class="ai-ref-mac" title="${escapeHtml(mac)}">${ref}</span>` : ref;
+    });
+  }
+
+  // aiMentioned lists the device references in the conversation, first
+  // mention first.
+  function aiMentioned() {
+    const seen = new Set();
+    for (const m of ai.history) for (const ref of m.text.match(AI_REF) || []) if (ai.snap?.devices.has(ref)) seen.add(ref);
+    return [...seen];
+  }
+
+  function aiRenderDevices() {
+    if (!ai.snap) return;
+    const q = $("ai-dev-filter").value.trim().toLowerCase();
+    const match = (d) => !q || [d.ref, d.name, d.ip, d.vendor].some((v) => v.toLowerCase().includes(q));
+    const mentioned = aiMentioned();
+    const all = [...ai.snap.devices.values()];
+    const row = (d) => `<div class="ai-dev" data-ref="${d.ref}">
+        <button type="button" class="ai-dev-main" data-id="${escapeHtml(d.id)}" title="Show this device's details">
+          <span class="ai-dev-ref mono">${d.ref}</span>
+          <span class="ai-dev-name"${d.name ? ` title="${escapeHtml(d.name)}"` : ""}>${d.name ? escapeHtml(d.name) : `<span class="muted">no name</span>`}${d.listed ? "" : ` <span class="tag-pill missing">not in this scan</span>`}</span>
+          <span class="ai-dev-ip mono">${escapeHtml(d.ip)}</span>
+          ${d.open ? `<span class="sev ${escapeHtml(d.worst)}">${d.open}</span>` : `<span></span>`}
+        </button>
+        <button type="button" class="ai-mention" data-ref="${d.ref}" title="Mention ${d.ref} in your reply" aria-label="Mention ${d.ref} in your reply">↵</button>
+      </div>`;
+    const first = mentioned.map((r) => ai.snap.devices.get(r)).filter(match);
+    const rest = all.filter((d) => d.listed && !mentioned.includes(d.ref) && match(d));
+    let html = "";
+    if (first.length) html += `<p class="ai-dev-group">Mentioned</p>` + first.map(row).join("");
+    if (rest.length) html += `<p class="ai-dev-group">${first.length ? "Other devices" : "All devices"}</p>` + rest.map(row).join("");
+    $("ai-dev-list").innerHTML = html || `<p class="muted small ai-dev-none">No device matches “${escapeHtml(q)}”.</p>`;
+    $("ai-dev-count").textContent = String(all.filter((d) => d.listed).length);
+  }
+
+  // Hovering a chip lights its device row, and hovering a row lights its chips.
+  function aiHot(ref, on) {
+    document.querySelectorAll(`#tab-analyze [data-ref="${ref}"]`).forEach((el) => el.classList.toggle("is-hot", on));
+    if (on) document.querySelector(`#ai-dev-list .ai-dev[data-ref="${ref}"]`)?.scrollIntoView({ block: "nearest" });
+  }
+
+  function aiMention(ref) {
+    const box = $("ai-reply");
+    const at = box.selectionStart ?? box.value.length;
+    const before = box.value.slice(0, at);
+    const text = (before && !/\s$/.test(before) ? " " : "") + ref + " ";
+    box.value = before + text + box.value.slice(box.selectionEnd ?? at);
+    const caret = before.length + text.length;
+    aiSync();
+    if (!box.disabled) {
+      box.focus();
+      box.setSelectionRange(caret, caret);
+    }
+  }
+
+  // aiReveal scrolls the page just enough to show the conversation with its
+  // reply box. When the panel is taller than the screen (phones), it shows
+  // the latest message from its start instead; the reply box follows it.
+  function aiReveal() {
+    if (!aiTalking() || $("tab-analyze").hidden) return;
+    const panel = $("ai-thread").closest(".ai-conversation");
+    const r = panel.getBoundingClientRect();
+    if (r.height <= window.innerHeight) {
+      if (r.top < 0 || r.bottom > window.innerHeight) panel.scrollIntoView({ block: r.top < 0 ? "start" : "end", behavior: "smooth" });
+      return;
+    }
+    const last = $("ai-thread").lastElementChild;
+    if (last) last.scrollIntoView({ block: "start", behavior: "smooth" });
+  }
+
+  async function aiSend() {
+    const cs = $("ai-chat-status");
+    if (!ai.history.length) {
+      ai.prompt = $("ai-prompt").value;
+      ai.snap = aiSnapshot();
+      ai.showSetup = false;
+    }
+    else ai.history.push({ role: "user", text: $("ai-reply").value.trim() });
+    const history = ai.history.slice();
+    ai.ctrl = new AbortController();
+    ai.started = Date.now();
+    ai.startError = "";
+    cs.textContent = "";
+    aiRenderThread();
+    aiSync();
+    aiReveal();
+    ai.timer = setInterval(() => {
+      const w = $("ai-wait");
+      if (w) w.textContent = `Thinking… ${Math.round((Date.now() - ai.started) / 1000)} s (a first answer can take a minute or two)`;
+    }, 1000);
+    try {
+      const res = await api("/api/assistant/ask", {
+        method: "POST",
+        signal: ai.ctrl.signal,
+        body: JSON.stringify({
+          backend: ai.backend,
+          prompt: ai.prompt,
+          history,
+          localUrl: $("ai-local-url").value.trim(),
+          localModel: $("ai-local-model").value,
+        }),
+      });
+      ai.history.push({ role: "assistant", text: res.reply });
+      $("ai-reply").value = "";
+    } catch (e) {
+      // Keep the owner's unanswered reply in the box to send again. A failed
+      // start is reported where the Start button is.
+      const msg = e.name === "AbortError" ? "Stopped." : e.message;
+      if (history.length) {
+        $("ai-reply").value = ai.history.pop().text;
+        cs.textContent = msg;
+      } else {
+        ai.startError = msg === "Stopped." ? "Stopped. Start again when you are ready." : msg;
+      }
+    } finally {
+      clearInterval(ai.timer);
+      ai.ctrl = null;
+    }
+    aiRenderThread();
+    aiSync();
+    if (ai.history.length) $("ai-reply").focus({ preventScroll: true });
+    aiReveal();
+  }
+
+  function aiBind() {
+    if (ai.bound) return;
+    ai.bound = true;
+    $("ai-local-url").value = remembered(AI_LOCAL_KEY, "http://127.0.0.1:8080");
+    ai.backend = remembered(AI_BACKEND_KEY);
+    $("ai-ack").addEventListener("change", () => {
+      ai.consentOpen = !$("ai-ack").checked;
+      aiSync();
+    });
+    // Change reopens the notice unacknowledged: adjust the masks, then tick again.
+    $("ai-consent-edit").addEventListener("click", () => {
+      $("ai-ack").checked = false;
+      ai.consentOpen = true;
+      aiSync();
+      $("ai-mask-macs").focus();
+    });
+    const remask = () => aiUsePrompt();
+    $("ai-mask-macs").addEventListener("change", remask);
+    $("ai-mask-names").addEventListener("change", remask);
+    $("ai-prompt").addEventListener("input", aiSync);
     $("ai-copy").addEventListener("click", async () => {
+      const area = $("ai-prompt");
       try {
         await navigator.clipboard.writeText(area.value);
-        status.textContent = "Copied. Paste it into the AI chat you chose.";
+        $("ai-status").textContent = "Copied.";
       } catch {
+        $("ai-prompt-details").open = true;
         area.select();
-        status.textContent = document.execCommand("copy") ? "Copied. Paste it into the AI chat you chose." : "Could not copy. Select the text and copy it yourself.";
+        $("ai-status").textContent = document.execCommand("copy") ? "Copied." : "Could not copy. Select the text and copy it yourself.";
       }
     });
     $("ai-download").addEventListener("click", () => {
-      const url = URL.createObjectURL(new Blob([area.value], { type: "text/markdown" }));
+      const url = URL.createObjectURL(new Blob([$("ai-prompt").value], { type: "text/markdown" }));
       const a = document.createElement("a");
       a.href = url;
       a.download = "network-sweeper-analysis-prompt.md";
@@ -1638,9 +2125,86 @@
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     });
-    load();
+    $("ai-local-check").addEventListener("click", () => {
+      remember(AI_LOCAL_KEY, $("ai-local-url").value.trim());
+      aiLoadBackends();
+    });
+    $("ai-reply").addEventListener("input", aiSync);
+    $("ai-reply").addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !$("ai-send").disabled) aiSend();
+    });
+    $("ai-send").addEventListener("click", aiSend);
+    $("ai-thread").addEventListener("click", (e) => {
+      if (e.target.closest("#ai-start")) aiSend();
+      const chip = e.target.closest(".ai-ref[data-id]");
+      if (chip) openDevice(chip.dataset.id);
+    });
+    $("ai-dev-list").addEventListener("click", (e) => {
+      const mention = e.target.closest(".ai-mention");
+      if (mention) return aiMention(mention.dataset.ref);
+      const main = e.target.closest(".ai-dev-main");
+      if (main) openDevice(main.dataset.id);
+    });
+    for (const id of ["ai-thread", "ai-dev-list"]) {
+      $(id).addEventListener("mouseover", (e) => {
+        const el = e.target.closest("[data-ref]");
+        if (el && !el.contains(e.relatedTarget)) aiHot(el.dataset.ref, true);
+      });
+      $(id).addEventListener("mouseout", (e) => {
+        const el = e.target.closest("[data-ref]");
+        if (el && !el.contains(e.relatedTarget)) aiHot(el.dataset.ref, false);
+      });
+    }
+    $("ai-dev-filter").addEventListener("input", aiRenderDevices);
+    $("ai-setup-toggle").addEventListener("click", () => {
+      ai.showSetup = !ai.showSetup;
+      aiSync();
+    });
+    $("ai-stop").addEventListener("click", () => ai.ctrl?.abort());
+    $("ai-reset").addEventListener("click", () => {
+      if (!confirm("Start over? This conversation will be lost.")) return;
+      ai.history = [];
+      ai.prompt = "";
+      ai.startError = "";
+      ai.snap = null;
+      ai.showSetup = false;
+      $("ai-dev-filter").value = "";
+      $("ai-chat-status").textContent = "";
+      syncAnalyzeTab(); // heading, warning and prompt move to the latest scan
+    });
+    $("ai-copy-chat").addEventListener("click", async () => {
+      const who = aiBackend()?.label || "AI";
+      const text = [ai.prompt, ...ai.history.map((m) => `## ${m.role === "assistant" ? who : "You"}\n\n${m.text}`)].join("\n\n");
+      try {
+        await navigator.clipboard.writeText(text);
+        $("ai-chat-status").textContent = "Conversation copied.";
+      } catch {
+        $("ai-chat-status").textContent = "Could not copy the conversation.";
+      }
+    });
+    window.addEventListener("beforeunload", (e) => {
+      if (aiTalking()) e.preventDefault();
+    });
   }
-  $("analyze-btn").addEventListener("click", openAnalysis);
+
+  $("analyze-btn").addEventListener("click", () => activateTab("analyze"));
+
+  // aiNudge draws the eye to Analyze once a scan finishes: the button glows
+  // briefly, and the tab keeps a dot until it is opened.
+  function aiNudge() {
+    if (!state.inv?.latestScan) return;
+    const b = $("analyze-btn");
+    b.classList.remove("is-fresh");
+    void b.offsetWidth; // restart the animation
+    b.classList.add("is-fresh");
+    if ($("tab-analyze").hidden) $("tabbtn-analyze").classList.add("has-news");
+  }
+  $("analyze-btn").addEventListener("animationend", () => $("analyze-btn").classList.remove("is-fresh"));
+  $("ai-rescan").addEventListener("click", () => {
+    activateTab("devices", false);
+    $("scan-btn").scrollIntoView({ block: "center" });
+    $("scan-btn").focus();
+  });
 
   // ---------- export ----------
 

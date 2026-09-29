@@ -13,6 +13,7 @@ Local LAN inventory + heuristic exposure findings with an embedded localhost web
 - Default scan targets = detected local CIDRs. Custom CIDRs outside that allowlist require explicit opt-in.
 - Do not add exploit payloads, weaponized scanners, or remote-target features without strong authorization UX.
 - Findings stay educational (title, description, remediation) — not attack recipes.
+- AI chat (`internal/assistant`): never run an AI agent as root (under sudo it runs as `SUDO_UID`; root without sudo is refused). CLI backends run with every tool off (Claude `--tools ""`; Codex with its shell, code and browser features disabled, refusing any version that lacks one of those switches). The local model server URL is loopback-only. The app itself makes no outbound AI calls and has no API keys.
 
 ## Discovery semantics
 

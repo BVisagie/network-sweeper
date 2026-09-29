@@ -47,10 +47,33 @@ type Device struct {
 type Input struct {
 	AppVersion string
 	OS         string
-	Network    string // the profile's name
+	Now        time.Time // when the prompt is built; zero leaves it out
+	Network    string    // the profile's name
 	Scan       *inventory.Snapshot
 	Devices    []Device
 	Changes    *inventory.Comparison // nil with fewer than two scans
+}
+
+// Key says which device and MAC each reference in the prompt stands for. It
+// stays in the UI, so the owner can read device-14 as their own device; it
+// is never part of the prompt.
+type Key struct {
+	Devices []DeviceRef `json:"devices"`
+	MACs    []MACRef    `json:"macs"`
+}
+
+// DeviceRef maps device-N to an inventory device. Listed is false for a
+// device that only the comparison mentions.
+type DeviceRef struct {
+	Ref      string `json:"ref"`
+	DeviceID string `json:"deviceId"`
+	Listed   bool   `json:"listed"`
+}
+
+// MACRef maps mac-N to the address it masks.
+type MACRef struct {
+	Token string `json:"token"`
+	MAC   string `json:"mac"`
 }
 
 // Stats summarizes a built prompt.
@@ -153,6 +176,7 @@ type changesOut struct {
 
 type doc struct {
 	GeneratedBy string      `json:"generatedBy"`
+	GeneratedAt string      `json:"generatedAt,omitempty"`
 	Network     string      `json:"network,omitempty"`
 	Masked      []string    `json:"masked,omitempty"`
 	Scan        scanOut     `json:"scan"`
@@ -160,11 +184,12 @@ type doc struct {
 	Changes     *changesOut `json:"changesSincePreviousScan,omitempty"`
 }
 
-// Build returns the prompt text and its stats.
-func Build(in Input, opt Options) (string, Stats) {
+// Build returns the prompt text, its stats, and the key to its references.
+func Build(in Input, opt Options) (string, Stats, Key) {
 	m := newMasker(in, opt)
 	d := doc{
 		GeneratedBy: "Network Sweeper " + in.AppVersion,
+		GeneratedAt: day(in.Now, true),
 		Network:     m.name(in.Network),
 		Devices:     []deviceOut{},
 	}
@@ -314,7 +339,28 @@ func Build(in Input, opt Options) (string, Stats) {
 	out := strings.Replace(tmpl, "{{DATA}}", data, 1)
 	stats.Chars = len([]rune(out))
 	stats.Tokens = (stats.Chars + 3) / 4
-	return out, stats
+	return out, stats, m.key()
+}
+
+// key lists every reference used, in reference order.
+func (m *masker) key() Key {
+	k := Key{Devices: []DeviceRef{}, MACs: []MACRef{}}
+	for _, d := range m.devices {
+		k.Devices = append(k.Devices, DeviceRef{Ref: m.refs[d.ID], DeviceID: d.ID, Listed: d.SeenInLatest && d.Last != nil})
+	}
+	for mac, t := range m.macs {
+		k.MACs = append(k.MACs, MACRef{Token: t, MAC: mac})
+	}
+	sort.Slice(k.MACs, func(i, j int) bool { return refLess(k.MACs[i].Token, k.MACs[j].Token) })
+	return k
+}
+
+// refLess orders mac-2 before mac-10.
+func refLess(a, b string) bool {
+	if len(a) != len(b) {
+		return len(a) < len(b)
+	}
+	return a < b
 }
 
 func day(t time.Time, withTime bool) string {

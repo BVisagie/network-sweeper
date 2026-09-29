@@ -54,6 +54,8 @@ sudo ./network-sweeper-darwin-amd64
 
 TCP discovery and findings scans work without elevation. Full matrix: [PLATFORM.md](PLATFORM.md).
 
+With `sudo`, **Analyze with AI** runs the Claude or Codex CLI as the user who started sudo, never as root. Not yet verified on macOS: whether Claude's Keychain-stored login is reachable after that switch. If it is not, use the local model server option, or run without sudo.
+
 ## Saved history
 
 Scan history, device names, notes, tags, and finding reviews are saved in `~/Library/Application Support/network-sweeper`. Pass `--data-dir DIR` to use another folder, or `--ephemeral` to keep nothing after exit. Elevated runs (`sudo`) keep history in memory only, so root never writes into your inventory; add `--data-dir` if you want an elevated run to save. Settings → **History and saved data** shows where data lives, sets how many scans to keep (100 by default), and deletes history.

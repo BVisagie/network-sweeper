@@ -49,7 +49,7 @@ Compare the hash to the matching line in `SHA256SUMS`.
 
 ## Elevation and Deep discovery
 
-On Windows, system `ping` is already tried as a best-effort discovery boost **even without Admin and even when Deep is unchecked**. For quieter devices, optionally right-click the `.exe` → **Run as administrator**. The Deep checkbox is optional. Active ARP sweep is deferred (not implemented) on Windows in this version.
+On Windows, system `ping` is already tried as a best-effort discovery boost **even without Admin and even when Deep is unchecked**. For quieter devices, optionally right-click the `.exe` → **Run as administrator**. The Deep checkbox is optional. Active ARP sweep is deferred (not implemented) on Windows in this version. **Analyze with AI** can ask the Claude or Codex CLI either way, because Run as administrator keeps your own user profile and login.
 
 TCP discovery and findings scans work without elevation. Full matrix: [PLATFORM.md](PLATFORM.md).
 
