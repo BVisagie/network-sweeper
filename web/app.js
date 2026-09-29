@@ -1565,15 +1565,15 @@
     const html = `
       <p class="banner is-warn">This prompt describes your network: its devices, open services, software versions, and possible weak spots. AI services may keep what you paste, log it, or train on it. Network Sweeper sends nothing itself. Masking hides MAC addresses, names, tags, and notes, but IP addresses, vendors, and services stay. A model on your own computer, or a provider you trust, is safest. Sharing it is at your own risk.</p>
       <section class="detail-section ai-analysis">
+        <label class="check"><input type="checkbox" id="ai-ack" /><span>I understand the risk of sharing this.</span></label>
         <div class="ai-masks">
           <label class="check inline"><input type="checkbox" id="ai-mask-macs" checked /><span>Mask MAC addresses</span></label>
           <label class="check inline"><input type="checkbox" id="ai-mask-names" checked /><span>Mask device names, hostnames, tags, and notes</span></label>
         </div>
-        <label class="field"><span>Prompt <small class="muted">(check it, and edit it if you like; changing a mask rebuilds it)</small></span>
-          <textarea id="ai-prompt" class="ai-prompt" rows="14" spellcheck="false" readonly>Building the prompt…</textarea></label>
+        <label class="field"><span>Prompt <small class="muted">(unlocks once you tick the box above; you can edit it, and changing a mask rebuilds it)</small></span>
+          <textarea id="ai-prompt" class="ai-prompt" rows="14" spellcheck="false" disabled>Building the prompt…</textarea></label>
         <p id="ai-stats" class="muted small"></p>
         <p class="help">Paste it into any capable AI chat. The model will probably ask you a few questions about your network first; answering them gets you better advice. Take care what you share in those answers too.</p>
-        <label class="check"><input type="checkbox" id="ai-ack" /><span>I understand the risk of sharing this.</span></label>
         <div class="form-actions">
           <button type="button" class="primary" id="ai-copy" disabled>Copy prompt</button>
           <button type="button" class="ghost" id="ai-download" disabled>Download .md</button>
@@ -1587,7 +1587,10 @@
     let counts = null;
     let seq = 0;
     const sync = () => {
+      // The prompt stays locked (no selecting, editing or copying by hand)
+      // until the risk is acknowledged.
       const ok = !!counts && $("ai-ack").checked;
+      area.disabled = !ok;
       $("ai-copy").disabled = !ok;
       $("ai-download").disabled = !ok;
       $("ai-stats").textContent = counts
@@ -1597,7 +1600,6 @@
     const load = async () => {
       const mine = ++seq;
       counts = null;
-      area.readOnly = true;
       sync();
       const q = new URLSearchParams({ maskMacs: $("ai-mask-macs").checked ? "1" : "0", maskNames: $("ai-mask-names").checked ? "1" : "0" });
       if (state.inv.profileId) q.set("profile", state.inv.profileId);
@@ -1605,7 +1607,6 @@
         const res = await api("/api/analysis-prompt?" + q);
         if (mine !== seq || !document.contains(area)) return;
         area.value = res.prompt;
-        area.readOnly = false;
         counts = res.stats;
         status.textContent = "";
       } catch (e) {
