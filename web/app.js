@@ -546,7 +546,13 @@
   }
 
   let previewTimer = null;
+  let previewSeq = 0;
   function updatePreview() {
+    // The last plan no longer describes the selection. Drop it (and any
+    // preview still in flight) so the summary follows the selection itself
+    // until the new preview arrives.
+    state.preview = null;
+    previewSeq++;
     renderScanSummary();
     clearTimeout(previewTimer);
     previewTimer = setTimeout(runPreview, 200);
@@ -581,12 +587,14 @@
   $("setup-toggle").addEventListener("click", () => setSetupOpen($("scan-setup").hidden, true));
 
   async function runPreview() {
+    const mine = ++previewSeq;
     const el = $("preview");
     const targets = scanTargets();
     if (!targets.length) {
       state.preview = null;
       el.className = "preview is-warn";
       el.textContent = "Select at least one network, or enter a range.";
+      renderScanSummary();
       syncScanButton();
       return;
     }
@@ -596,6 +604,7 @@
         deep: $("deep").checked,
         customOptIn: $("custom-optin").checked,
       });
+      if (mine !== previewSeq) return; // the selection changed while this was in flight
       state.preview = res;
       const p = res.plan || {};
       if (res.ok) {
@@ -615,6 +624,7 @@
         });
       }
     } catch (e) {
+      if (mine !== previewSeq) return;
       state.preview = null;
       el.className = "preview is-warn";
       el.textContent = e.message;
