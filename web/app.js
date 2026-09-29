@@ -650,7 +650,7 @@
 
   function setScanning(running) {
     $("scan-strip").hidden = !running;
-    document.body.classList.toggle("is-scanning", running);
+    document.documentElement.classList.toggle("is-scanning", running);
     state.stopping = false;
     // A scan's ranges and options are fixed once it starts, and deleting
     // history under it would lose it: lock those controls until it ends.

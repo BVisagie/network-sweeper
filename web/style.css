@@ -53,12 +53,14 @@
   --control-h: 2rem;
   --gutter: clamp(1rem, 2vw, 1.5rem);
   --measure: 65ch; /* about 70 characters of prose */
-  /* What stays pinned at the top while the page scrolls: the scan strip
-     while scanning, and from 1200px the app bar too. Sticky panels start
-     below it. */
+  /* What stays pinned at the top while the page scrolls: the app bar from
+     1200px (--appbar-pin), and the scan strip below it while scanning.
+     Sticky panels start below --sticky-top, and scrolling to an element or
+     focusing one keeps it clear of that chrome. */
   --appbar-h: 2.8125rem;
   --strip-h: 2.5rem;
-  --sticky-top: 0px;
+  --appbar-pin: 0px;
+  --sticky-top: var(--appbar-pin);
   --shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
 }
 
@@ -211,11 +213,12 @@ button.appbar-status:hover {
   .tabs { order: 0; flex: 0 1 auto; }
 }
 
-body.is-scanning { --sticky-top: var(--strip-h); }
+:root.is-scanning { --sticky-top: calc(var(--appbar-pin) + var(--strip-h)); }
+
+html { scroll-padding-top: calc(var(--sticky-top) + 0.75rem); }
 
 @media (min-width: 1200px) {
-  :root { --sticky-top: var(--appbar-h); }
-  body.is-scanning { --sticky-top: calc(var(--appbar-h) + var(--strip-h)); }
+  :root { --appbar-pin: var(--appbar-h); }
 
   .appbar {
     position: sticky;
@@ -223,8 +226,6 @@ body.is-scanning { --sticky-top: var(--strip-h); }
     z-index: 31;
     min-height: var(--appbar-h);
   }
-
-  .scan-strip { top: var(--appbar-h); }
 }
 
 .tabs button {
@@ -284,9 +285,6 @@ body.is-scanning { --sticky-top: var(--strip-h); }
 .consent .panel-body .consent-lead { color: var(--fg); }
 .consent-subnets { margin: 0.9rem 0 0.25rem; }
 .consent-actions { margin-top: 1rem; }
-
-.panel,
-.ai-conversation { scroll-margin-top: calc(var(--sticky-top) + 0.75rem); }
 
 .panel {
   border: 1px solid var(--line);
@@ -841,7 +839,7 @@ button.disclosure[aria-expanded="true"]::after { transform: translateY(0.1rem) r
 /* Scan progress: a slim strip under the app bar on every tab, with Stop. */
 .scan-strip {
   position: sticky;
-  top: 0;
+  top: var(--appbar-pin);
   z-index: 30;
   display: flex;
   align-items: center;
