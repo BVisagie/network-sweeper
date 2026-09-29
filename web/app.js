@@ -1574,6 +1574,7 @@
     scanKey: "", // profile and scan the prompt was built from; "" to rebuild
     promptScan: null, // that scan, which the heading describes during a conversation
     backendSeq: 0,
+    startError: "", // why the first send failed, shown where Start is
     backends: [],
     backendsLoaded: false,
     backend: "",
@@ -1763,8 +1764,12 @@
     $("ai-reply-wrap").hidden = !replying;
     $("ai-reply").disabled = !ok || busy;
     $("ai-hint").hidden = !replying || busy;
-    $("ai-send").textContent = replying ? "Send" : "Start analysis";
-    $("ai-send").disabled = !ok || busy || !b?.available || (replying && !$("ai-reply").value.trim());
+    // Before the first reply, Start sits in the middle of the conversation;
+    // the composer below appears once there is something to answer.
+    $("ai-composer").hidden = !talking;
+    $("ai-thread").closest(".ai-conversation").classList.toggle("is-talking", talking);
+    $("ai-send").hidden = !replying;
+    $("ai-send").disabled = !ok || busy || !b?.available || !$("ai-reply").value.trim();
     $("ai-stop").hidden = !busy;
     $("ai-copy-chat").hidden = !replying;
     $("ai-reset").hidden = !replying || busy;
@@ -1788,14 +1793,22 @@
     const b = aiBackend();
     if (!aiTalking()) {
       let text;
+      let ready = false;
       if (!$("ai-ack").checked) text = "Read the notice on the left, choose what to mask, then tick “I understand the risk” to begin.";
       else if (!ai.counts) text = "Building the prompt…";
       else if (!b?.available)
         text = ai.backends.some((x) => x.available)
           ? "Choose an AI on the left."
           : "No AI was found on this computer. Install the Claude or Codex CLI, start a local model server, or copy the prompt into any AI chat.";
-      else text = `Start analysis sends the prompt (≈${fmtNumber(Math.ceil($("ai-prompt").value.length / 4))} tokens) to ${b.label}. It will probably ask you a few questions first; answer them here.`;
-      thread.innerHTML = `<div class="ai-empty"><p>${escapeHtml(text)}</p></div>`;
+      else {
+        ready = true;
+        text = `Sends the prompt (≈${fmtNumber(Math.ceil($("ai-prompt").value.length / 4))} tokens). It will probably ask you a few questions first; answer them here.`;
+      }
+      thread.innerHTML = `<div class="ai-empty">
+        ${ai.startError ? `<p class="banner is-error">${escapeHtml(ai.startError)}</p>` : ""}
+        ${ready ? `<button type="button" class="primary large" id="ai-start">Start analysis with ${escapeHtml(b.label)}</button>` : ""}
+        <p>${escapeHtml(text)}</p>
+      </div>`;
       return;
     }
     const who = b?.label || "AI";
@@ -1809,7 +1822,10 @@
     }
     if (ai.ctrl) items.push(`<div class="ai-msg ai-msg-ai"><p class="ai-who">${escapeHtml(who)}</p><p class="muted small ai-wait" id="ai-wait">Thinking…</p></div>`);
     thread.innerHTML = items.join("");
-    thread.scrollTop = thread.scrollHeight;
+    // Show a new reply from its first line; otherwise keep the latest in view.
+    const last = thread.lastElementChild;
+    if (!ai.ctrl && last?.classList.contains("ai-msg-ai")) thread.scrollTop = last.offsetTop - thread.offsetTop - 12;
+    else thread.scrollTop = thread.scrollHeight;
   }
 
   // renderMarkdown shows a reply's headings, lists, emphasis and code. The
@@ -1884,9 +1900,13 @@
     const history = ai.history.slice();
     ai.ctrl = new AbortController();
     ai.started = Date.now();
+    ai.startError = "";
     cs.textContent = "";
     aiRenderThread();
     aiSync();
+    // The conversation now fills the screen: bring its reply box and Stop into view.
+    const panel = $("ai-thread").closest(".ai-conversation");
+    if (panel.getBoundingClientRect().bottom > window.innerHeight) panel.scrollIntoView({ block: "start", behavior: "smooth" });
     ai.timer = setInterval(() => {
       const w = $("ai-wait");
       if (w) w.textContent = `Thinking… ${Math.round((Date.now() - ai.started) / 1000)} s (a first answer can take a minute or two)`;
@@ -1906,9 +1926,15 @@
       ai.history.push({ role: "assistant", text: res.reply });
       $("ai-reply").value = "";
     } catch (e) {
-      // Keep the owner's unanswered reply in the box to send again.
-      if (history.length) $("ai-reply").value = ai.history.pop().text;
-      cs.textContent = e.name === "AbortError" ? "Stopped." : e.message;
+      // Keep the owner's unanswered reply in the box to send again. A failed
+      // start is reported where the Start button is.
+      const msg = e.name === "AbortError" ? "Stopped." : e.message;
+      if (history.length) {
+        $("ai-reply").value = ai.history.pop().text;
+        cs.textContent = msg;
+      } else {
+        ai.startError = msg === "Stopped." ? "Stopped. Start again when you are ready." : msg;
+      }
     } finally {
       clearInterval(ai.timer);
       ai.ctrl = null;
@@ -1968,11 +1994,15 @@
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !$("ai-send").disabled) aiSend();
     });
     $("ai-send").addEventListener("click", aiSend);
+    $("ai-thread").addEventListener("click", (e) => {
+      if (e.target.closest("#ai-start")) aiSend();
+    });
     $("ai-stop").addEventListener("click", () => ai.ctrl?.abort());
     $("ai-reset").addEventListener("click", () => {
       if (!confirm("Start over? This conversation will be lost.")) return;
       ai.history = [];
       ai.prompt = "";
+      ai.startError = "";
       $("ai-chat-status").textContent = "";
       syncAnalyzeTab(); // heading, warning and prompt move to the latest scan
     });

@@ -265,11 +265,11 @@
               </div>
             </div>
             <div id="ai-thread" class="ai-thread" aria-live="polite"></div>
-            <div class="ai-composer">
+            <div class="ai-composer" id="ai-composer" hidden>
               <p id="ai-note" class="banner is-warn" hidden></p>
               <label class="field" id="ai-reply-wrap" hidden><span class="sr-only">Your reply</span><textarea id="ai-reply" rows="3" maxlength="20000" placeholder="Answer the questions, or ask for the assessment…"></textarea></label>
               <div class="form-actions">
-                <button type="button" class="primary" id="ai-send" disabled>Start analysis</button>
+                <button type="button" class="primary" id="ai-send" disabled>Send</button>
                 <button type="button" class="ghost" id="ai-stop" hidden>Stop</button>
                 <span id="ai-chat-status" class="status-line" aria-live="polite"></span>
                 <span class="muted small ai-hint" id="ai-hint" hidden>Ctrl+Enter to send</span>
