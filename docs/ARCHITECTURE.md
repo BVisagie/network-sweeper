@@ -28,6 +28,8 @@ internal/platform      Elevation detection + capability snapshot for Settings â†
 internal/update        Opt-in GitHub Releases check
 internal/version       Link-time version + public repo path for updates
 web/                   Embedded UI (index.html, style.css, app.js) via embed.FS
+testdata/ui            Synthetic data directory for checking the UI without scanning (written by
+                       TestWriteUIData in internal/inventory; see CONTRIBUTING.md)
 ```
 
 ## Scan flow

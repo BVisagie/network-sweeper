@@ -21,6 +21,7 @@ No Node install is required. End-user release binaries do not need Go at all.
 
 - Prefer **stdlib-only** Go. New module dependencies need a clear maintainer decision.
 - UI is vanilla HTML/CSS/JS under `web/` — no Node toolchain.
+- Check UI changes against the synthetic data in `testdata/ui` rather than a live LAN: `d=$(mktemp -d) && cp -r testdata/ui "$d/ui" && go run ./cmd/networksweeper -no-browser -data-dir "$d/ui"`. Its addresses are documentation ranges, so rescanning a device reaches nothing real; **Scan** still targets your own networks. To change the data, edit `TestWriteUIData` in `internal/inventory` and run it with `NS_WRITE_UI_DATA=1 go test ./internal/inventory -run TestWriteUIData`.
 - **Security invariants:** bind `127.0.0.1` only; keep session token + Origin checks; default targets = local CIDRs; custom ranges need explicit opt-in.
 - Discovery honesty: Deep = ICMP, plus active ARP on elevated Linux/macOS (Windows ARP stays deferred). ARP cache enrichment and `arp-cache` discovery (hosts the OS resolved during TCP dials) run on all OSes without elevation. Never mark unimplemented capabilities as `full` when elevated.
 - Evidence honesty: an open port alone is an inferred finding, never a confirmed one; missing or partial observations are "not observed", and a service is only reported closed when its port refused the connection.

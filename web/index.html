@@ -7,42 +7,53 @@
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <div class="atmosphere" aria-hidden="true"></div>
-  <div id="app" class="shell">
-    <header class="top">
-      <div class="brand">
-        <p class="eyebrow">Local network inventory</p>
-        <h1>Network Sweeper</h1>
-        <p class="tag">Keep track of the devices on your network, what they run, and what changed since last time.</p>
-      </div>
-      <div class="meta">
-        <a
-          class="github-link"
-          href="https://github.com/BVisagie/network-sweeper"
-          target="_blank"
-          rel="noopener noreferrer"
-          title="View source on GitHub"
-          aria-label="View Network Sweeper source on GitHub"
-        >
-          <svg class="github-icon" viewBox="0 0 16 16" width="18" height="18" aria-hidden="true">
-            <path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
-          </svg>
-        </a>
-        <span id="version" class="version-pill"></span>
-        <span id="storage-badge" class="badge storage-badge" hidden></span>
-        <span id="priv-badge" class="badge priv-badge" aria-live="polite"></span>
-      </div>
-    </header>
+  <header class="appbar">
+    <div class="appbar-brand">
+      <svg class="appbar-mark" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+        <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-opacity="0.45" />
+        <circle cx="8" cy="8" r="3.5" fill="none" stroke="currentColor" stroke-opacity="0.45" />
+        <path fill="currentColor" d="M8 8V1.5A6.5 6.5 0 0 1 14.5 8z" fill-opacity="0.35" />
+        <path stroke="currentColor" stroke-width="1.4" stroke-linecap="round" d="M8 8l4.6-4.6" />
+      </svg>
+      <h1>Network Sweeper</h1>
+      <span id="version" class="appbar-version"></span>
+    </div>
+    <nav class="tabs" id="tabs" role="tablist" aria-label="Dashboard sections" hidden>
+      <button type="button" role="tab" id="tabbtn-devices" data-tab="devices" class="active" aria-selected="true" aria-controls="tab-devices">Devices</button>
+      <button type="button" role="tab" id="tabbtn-changes" data-tab="changes" aria-selected="false" aria-controls="tab-changes" tabindex="-1">Changes</button>
+      <button type="button" role="tab" id="tabbtn-findings" data-tab="findings" aria-selected="false" aria-controls="tab-findings" tabindex="-1">Findings</button>
+      <button type="button" role="tab" id="tabbtn-analyze" data-tab="analyze" aria-selected="false" aria-controls="tab-analyze" tabindex="-1" hidden>Analyze</button>
+      <button type="button" role="tab" id="tabbtn-settings" data-tab="settings" aria-selected="false" aria-controls="tab-settings" tabindex="-1">Settings</button>
+    </nav>
+    <div class="appbar-meta">
+      <button type="button" id="storage-badge" class="appbar-status" hidden></button>
+      <button type="button" id="priv-badge" class="appbar-status" hidden></button>
+      <a
+        class="github-link"
+        href="https://github.com/BVisagie/network-sweeper"
+        target="_blank"
+        rel="noopener noreferrer"
+        title="View source on GitHub"
+        aria-label="View Network Sweeper source on GitHub"
+      >
+        <svg class="github-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+          <path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
+        </svg>
+      </a>
+    </div>
+  </header>
 
+  <div id="app" class="shell">
     <div id="disconnected" class="banner is-error" role="alert" hidden>
       Lost contact with Network Sweeper. Is it still running? This page reconnects on its own once it is back.
     </div>
 
-    <section id="consent" class="panel consent reveal">
+    <section id="consent" class="panel consent" aria-labelledby="consent-title">
       <div class="panel-head">
-        <h2>Before you scan</h2>
+        <h2 id="consent-title">Before you scan</h2>
       </div>
       <div class="panel-body">
+        <p class="consent-lead">Keep track of the devices on your network, what they run, and what changed since last time.</p>
         <p>Only scan networks you own or are explicitly authorized to assess. By default we only scan the networks attached to this computer.</p>
         <div class="consent-subnets">
           <p class="context-label">Networks attached to this computer</p>
@@ -59,14 +70,6 @@
     </section>
 
     <main id="main" hidden>
-      <nav class="tabs" role="tablist" aria-label="Dashboard sections">
-        <button type="button" role="tab" id="tabbtn-devices" data-tab="devices" class="active" aria-selected="true" aria-controls="tab-devices">Devices</button>
-        <button type="button" role="tab" id="tabbtn-changes" data-tab="changes" aria-selected="false" aria-controls="tab-changes" tabindex="-1">Changes</button>
-        <button type="button" role="tab" id="tabbtn-findings" data-tab="findings" aria-selected="false" aria-controls="tab-findings" tabindex="-1">Findings</button>
-        <button type="button" role="tab" id="tabbtn-analyze" data-tab="analyze" aria-selected="false" aria-controls="tab-analyze" tabindex="-1" hidden>Analyze</button>
-        <button type="button" role="tab" id="tabbtn-settings" data-tab="settings" aria-selected="false" aria-controls="tab-settings" tabindex="-1">Settings</button>
-      </nav>
-
       <section id="tab-devices" class="tab active" role="tabpanel" aria-labelledby="tabbtn-devices">
         <div class="panel">
           <div class="panel-head">
@@ -323,7 +326,7 @@
           </div>
         </div>
 
-        <div class="panel">
+        <div class="panel" id="storage">
           <div class="panel-head">
             <h3>History and saved data</h3>
           </div>
