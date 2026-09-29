@@ -60,7 +60,30 @@ testdata/ui            Synthetic data directory for checking the UI without scan
 
 `web/embed.go` embeds static assets. `api.uiHandler` replaces `__SESSION_TOKEN__` and `__APP_VERSION__` in `index.html`. Do not break those placeholders.
 
-The Devices table and device detail use shared float tips (`data-tip`) for beginner-friendly help on open ports. Device-supplied text is HTML-escaped with bidi control characters removed.
+The Devices table and the device inspector use shared float tips (`data-tip`) for beginner-friendly help on open ports. Device-supplied text is HTML-escaped with bidi control characters removed.
+
+## Web UI
+
+Vanilla HTML, CSS and JavaScript in `web/`, with no build step. It ships dark only, for current evergreen browsers (container queries, `<dialog>`, `:has()`, `color-mix()`), with no fallbacks for older engines.
+
+- **Theme.** Colors, type sizes (14, 13 and 12px), radii, and the 32px minimum control height are custom properties on `:root`. The system sans face is used for prose and controls, and the system monospace face for addresses, ports, counts, and section labels. Prose is capped at about 70 characters (`--measure`).
+- **Shell.** A compact app bar holds the name, version, tabs, and the storage and privilege status, which open their Settings section. It stays pinned from 1200px. While a scan runs, a sticky strip under it shows the phase, counts, and Stop on every tab. `--sticky-top` tells sticky panels where the pinned chrome ends.
+- **Devices.**
+  - A scan toolbar holds Scan, Analyze with AI, and a one-line summary of the next scan. A Scan setup disclosure holds the ranges, custom ranges, Deep discovery, and capability help.
+  - One network bar shows the saved network, its last scan (flagged after a day), and Export, and moves above Devices, Changes, and Findings.
+  - Search stays visible. The other filters sit behind a Filters disclosure, with removable chips for active filters.
+  - Disclosure state is a per-viewer `localStorage` convenience.
+- **Container queries, not window widths,** drive the layouts, so each follows the space it has, including beside the inspector:
+  - Device table: six columns from 960px. From 600px (what a 640px window leaves), a Device column combines name, badges, tags, address, and vendor, and a sort picker covers every order. Stacked rows below that.
+  - Scan history: a table from 720px, compact rows below.
+  - Analyze: two columns from 896px. Below that it stacks, with the conversation first, the device list folded, and the reply box pinned while the page scrolls.
+- **Inspector.** One `<dialog>` in two modes. From 1200px, `show()` docks it beside the view; it resizes by drag or keyboard between 360px and half the window and remembers its width. Narrower, `showModal()` makes it a full-window sheet, with the native focus trap and inert background.
+  - **Drafts:** name, tags, and notes are kept per device in memory. A refresh (a finished scan, a save, a reconnect) refills only the fields not being typed in. A draft clears only when the exact draft sent reaches the disk; a `saveError` keeps it.
+  - **Guard:** closing, Escape, or switching network with drafts pending offers Save, Discard, or Cancel. Escape is handled on `keydown`, because a browser may skip a `cancel` listener on a repeated Escape.
+  - **Loading:** detail requests are numbered, so only the latest renders. Failures show inline with Retry.
+  - **Focus:** closing returns focus to the control that opened the inspector.
+- **Findings.** Each card keeps its severity, confidence (confirmed or inferred), and review status in view. Evidence and review controls fold into a disclosure whose open state, like an unsent acknowledgement note, survives re-renders.
+- **Checking UI changes.** There is no browser test harness. Use the synthetic data in `testdata/ui` (see CONTRIBUTING.md) at 1920×1080, 1440×900, 1280×720, 960×720, 800×700, and 640×700, plus 390px and 200% zoom. No width should scroll sideways, and 640×700 should show at least five ordinary device rows (a name, one badge, two tags, four services).
 
 ## Deep discovery honesty
 

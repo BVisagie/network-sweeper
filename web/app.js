@@ -378,6 +378,7 @@
     if (slot && !slot.contains($("network-bar"))) slot.appendChild($("network-bar"));
     if (focus) document.getElementById("tabbtn-" + id)?.focus();
     if (id === "changes") loadChanges();
+    if (id === "settings") loadAiSettings();
     if (id === "analyze") {
       $("tabbtn-analyze").classList.remove("has-news");
       aiOpen();
@@ -649,7 +650,7 @@
 
   function setScanning(running) {
     $("scan-strip").hidden = !running;
-    document.body.classList.toggle("is-scanning", running);
+    document.documentElement.classList.toggle("is-scanning", running);
     state.stopping = false;
     // A scan's ranges and options are fixed once it starts, and deleting
     // history under it would lose it: lock those controls until it ends.
@@ -1719,6 +1720,19 @@
             }
             <button type="button" class="ghost compact" data-review="open" data-key="${escapeHtml(findingKey(f))}" data-device-id="${escapeHtml(f.deviceId)}">Reopen</button>
           </div>`;
+    // Severity, confidence and review status stay on the card; the evidence
+    // and review controls fold away.
+    const reviewPill =
+      review.status === "reopened"
+        ? `<span class="tag-pill review-reopened" title="The evidence changed since you acknowledged it">Reopened</span>`
+        : review.status === "acknowledged"
+          ? `<span class="tag-pill review-acked">Acknowledged</span>`
+          : "";
+    const more = [
+      evidence ? `<p class="fg small"><strong>Why it appeared</strong></p><ul class="evidence">${evidence}</ul>` : "",
+      f.unknown ? `<p class="small"><strong class="fg">Still unknown:</strong> ${escapeHtml(f.unknown)}</p>` : "",
+      f.deviceId ? reviewHtml : "",
+    ].join("");
     return `<article class="finding${review.status === "acknowledged" ? " is-acked" : ""}">
       <div class="finding-tags">
         <span class="sev ${escapeHtml(f.severity)}">${escapeHtml(f.severity)}</span>
@@ -1727,15 +1741,35 @@
         }">${escapeHtml(f.confidence)}</span>
         <span class="tag-pill">${escapeHtml(CATEGORY_LABEL[f.category] || f.category)}</span>
         ${f.port ? `<span class="tag-pill mono">port ${escapeHtml(f.port)}</span>` : ""}
+        ${reviewPill}
       </div>
       <h4>${escapeHtml(f.title)}</h4>
       <p>${escapeHtml(f.description)}</p>
-      ${evidence ? `<p class="fg small"><strong>Why it appeared</strong></p><ul class="evidence">${evidence}</ul>` : ""}
-      ${f.unknown ? `<p class="small"><strong class="fg">Still unknown:</strong> ${escapeHtml(f.unknown)}</p>` : ""}
       <p class="small"><strong class="fg">What to try:</strong> ${escapeHtml(f.remediation)}</p>
-      ${f.deviceId ? reviewHtml : ""}
+      ${
+        more
+          ? `<details class="finding-more" data-more-key="${escapeHtml(noteKey)}"${openMore.has(noteKey) ? " open" : ""}>
+        <summary>${f.deviceId ? (review.status === "open" ? "Evidence and review" : "Evidence and review note") : "Evidence"}</summary>
+        <div class="finding-more-body">${more}</div>
+      </details>`
+          : ""
+      }
     </article>`;
   }
+
+  // Which cards have their evidence open, so re-renders keep them open.
+  // (toggle does not bubble, hence the capture listener.)
+  const openMore = new Set();
+  document.addEventListener(
+    "toggle",
+    (e) => {
+      const key = e.target.dataset?.moreKey;
+      if (!key) return;
+      if (e.target.open) openMore.add(key);
+      else openMore.delete(key);
+    },
+    true
+  );
 
   // bindReviewControls wires review buttons and "Open device" links in a
   // freshly rendered list. Outcomes are reported inside the inspector when
@@ -1888,19 +1922,19 @@
       $("history").innerHTML = `<p class="empty">No saved scans yet.</p>`;
       return;
     }
-    $("history").innerHTML = `<div class="table-wrap"><table class="hosts-table mini-table">
+    $("history").innerHTML = `<div class="table-wrap"><table class="hosts-table mini-table history-table">
       <caption class="sr-only">Retained scans, newest first</caption>
       <thead><tr><th>When</th><th>Result</th><th>Ranges</th><th>Methods</th><th>Devices</th><th>Findings</th><th><span class="sr-only">Export</span></th></tr></thead>
       <tbody>${state.history
         .map(
           (s) => `<tr>
-          <td>${escapeHtml(fmtTime(s.finishedAt))}</td>
-          <td>${escapeHtml(STATE_LABEL[s.state] || s.state)}${s.partial ? ` <span class="tag-pill guess">partial</span>` : ""}</td>
-          <td class="mono">${escapeHtml((s.ranges || []).join(", "))}</td>
-          <td>${escapeHtml(methodsText(s.methods))}</td>
-          <td>${escapeHtml(s.hosts)}</td>
-          <td>${escapeHtml(s.findings)}</td>
-          <td class="nowrap"><button type="button" class="ghost compact" data-export-scan="${escapeHtml(s.id)}" data-format="json">JSON</button>
+          <td class="h-when">${escapeHtml(fmtTime(s.finishedAt))}</td>
+          <td class="h-result">${escapeHtml(STATE_LABEL[s.state] || s.state)}${s.partial ? ` <span class="tag-pill guess">partial</span>` : ""}</td>
+          <td class="h-ranges mono">${escapeHtml((s.ranges || []).join(", "))}</td>
+          <td class="h-methods">${escapeHtml(methodsText(s.methods))}</td>
+          <td class="h-count" data-label="devices">${escapeHtml(s.hosts)}</td>
+          <td class="h-count" data-label="findings">${escapeHtml(s.findings)}</td>
+          <td class="h-export nowrap"><button type="button" class="ghost compact" data-export-scan="${escapeHtml(s.id)}" data-format="json">JSON</button>
             <button type="button" class="ghost compact" data-export-scan="${escapeHtml(s.id)}" data-format="csv">CSV</button></td>
         </tr>`
         )
@@ -1913,18 +1947,19 @@
   $("cmp-current").addEventListener("change", loadChanges);
   $("cmp-previous").addEventListener("change", loadChanges);
 
+  // [key, heading, detail, one, many]: one and many name a count in the summary.
   const CHANGE_SECTIONS = [
-    ["newDevices", "New devices", () => ""],
-    ["addressChanges", "Address changes", (c) => `${c.from} → ${c.to}`],
-    ["newServices", "Newly observed services", (c) => `${c.port}/${c.service}`],
-    ["closedServices", "Services now refusing connections", (c) => `${c.port}/${c.service}`],
-    ["certChanges", "Certificate changes", (c) => `:${c.port} ${c.field}: ${c.from || "—"} → ${c.to || "—"}`],
-    ["newFindings", "New findings", (c) => `${c.severity} · ${c.title}`],
-    ["changedFindings", "Findings that changed", (c) => `${c.title}: ${c.from} → ${c.to}`],
-    ["resolvedFindings", "Findings resolved", (c) => c.title],
-    ["notObserved", "Not observed this time", () => ""],
-    ["unansweredServices", "Services that did not answer this time", (c) => `${c.port}/${c.service}`],
-    ["findingsNotSeen", "Findings not reported this time", (c) => c.title],
+    ["newDevices", "New devices", () => "", "new device", "new devices"],
+    ["addressChanges", "Address changes", (c) => `${c.from} → ${c.to}`, "address change", "address changes"],
+    ["newServices", "Newly observed services", (c) => `${c.port}/${c.service}`, "new service", "new services"],
+    ["closedServices", "Services now refusing connections", (c) => `${c.port}/${c.service}`, "closed service", "closed services"],
+    ["certChanges", "Certificate changes", (c) => `:${c.port} ${c.field}: ${c.from || "—"} → ${c.to || "—"}`, "certificate change", "certificate changes"],
+    ["newFindings", "New findings", (c) => `${c.severity} · ${c.title}`, "new finding", "new findings"],
+    ["changedFindings", "Findings that changed", (c) => `${c.title}: ${c.from} → ${c.to}`, "changed finding", "changed findings"],
+    ["resolvedFindings", "Findings resolved", (c) => c.title, "resolved finding", "resolved findings"],
+    ["notObserved", "Not observed this time", () => "", "not observed", "not observed"],
+    ["unansweredServices", "Services that did not answer this time", (c) => `${c.port}/${c.service}`, "unanswered service", "unanswered services"],
+    ["findingsNotSeen", "Findings not reported this time", (c) => c.title, "finding not reported", "findings not reported"],
   ];
 
   async function loadChanges() {
@@ -1955,9 +1990,16 @@
       c.current.partial ? " (partial)" : ""
     } with the one finished <strong>${escapeHtml(fmtTime(c.previous.finishedAt))}</strong>${c.previous.partial ? " (partial)" : ""}.</p>`;
     const scope = (c.scope || []).length ? `<div class="banner is-warn"><ul class="plain">${c.scope.map((s) => `<li>${escapeHtml(s)}</li>`).join("")}</ul></div>` : "";
-    const sections = CHANGE_SECTIONS.filter(([k]) => (c[k] || []).length)
+    const present = CHANGE_SECTIONS.filter(([k]) => (c[k] || []).length);
+    // Each count jumps to its group.
+    const summary = present.length
+      ? `<div class="summary-strip change-summary">${present
+          .map(([k, , , one, many]) => `<button type="button" class="sum-chip" data-jump="chg-${k}"><strong>${c[k].length}</strong> ${escapeHtml(c[k].length === 1 ? one : many)}</button>`)
+          .join("")}</div>`
+      : "";
+    const sections = present
       .map(
-        ([k, label, detail]) => `<section class="change-group">
+        ([k, label, detail]) => `<section class="change-group" id="chg-${k}" tabindex="-1">
           <h4>${escapeHtml(label)} <span class="count-pill">${c[k].length}</span></h4>
           <ul class="plain change-list">${c[k]
             .map(
@@ -1968,7 +2010,14 @@
             .join("")}</ul></section>`
       )
       .join("");
-    el.innerHTML = head + scope + (sections || `<p class="empty">No differences between these scans.</p>`);
+    el.innerHTML = head + summary + scope + (sections || `<p class="empty">No differences between these scans.</p>`);
+    el.querySelectorAll("[data-jump]").forEach((b) =>
+      b.addEventListener("click", () => {
+        const group = $(b.dataset.jump);
+        group.scrollIntoView({ block: "start" });
+        group.focus({ preventScroll: true });
+      })
+    );
     el.querySelectorAll("[data-open-device]").forEach((b, i) => {
       b.dataset.focusKey = `chg-${i}`;
       b.addEventListener("click", () => openDevice(b.dataset.openDevice, { from: b }));
@@ -2067,6 +2116,35 @@
       out.classList.add("is-error");
       out.textContent = e.message;
     }
+  });
+
+  // Settings → AI analysis: which AI tools are installed, and the local model
+  // server address, which it shares with the Analyze tab.
+  async function loadAiSettings() {
+    aiBind();
+    $("set-local-url").value = $("ai-local-url").value;
+    await aiLoadBackends();
+    renderAiSettings();
+  }
+
+  function renderAiSettings() {
+    $("ai-found").innerHTML = ai.backends.length
+      ? ai.backends
+          .map(
+            (b) => `<li><span class="ai-found-name">${escapeHtml(b.label)}${
+              b.version ? ` <span class="muted mono">${escapeHtml(b.version.replace(/\s*\(.*\)$/, ""))}</span>` : ""
+            }</span> <span class="small ${b.available ? "muted" : "ai-unavailable"}">${escapeHtml(b.available ? "Available" : b.reason || "Not available.")}</span></li>`
+          )
+          .join("")
+      : `<li class="muted small">Could not check for AI tools.</li>`;
+  }
+
+  $("set-local-check").addEventListener("click", async () => {
+    aiBind();
+    $("ai-local-url").value = $("set-local-url").value.trim();
+    remember(AI_LOCAL_KEY, $("ai-local-url").value);
+    await aiLoadBackends();
+    renderAiSettings();
   });
 
   function renderPortLists(ifaces) {
@@ -2337,7 +2415,7 @@
     $("ai-devices-panel").hidden = setupShown;
     $("ai-setup-bar").hidden = !talking;
     $("ai-setup-text").textContent = `${b?.label || "AI"} · MACs ${macs ? "masked" : "shown"} · names ${names ? "masked" : "shown"}`;
-    $("ai-setup-toggle").textContent = ai.showSetup ? "Back to devices" : "View setup and prompt";
+    $("ai-setup-toggle").setAttribute("aria-expanded", String(ai.showSetup));
 
     // Before the first reply, Start sits in the middle of the conversation;
     // the composer below appears once there is something to answer.
@@ -2704,6 +2782,15 @@
       });
     }
     $("ai-dev-filter").addEventListener("input", aiRenderDevices);
+    // In narrow layouts the device list folds under the conversation.
+    $("ai-dev-toggle").addEventListener("click", () => {
+      const open = !$("ai-devices-panel").classList.toggle("is-folded");
+      $("ai-dev-toggle").setAttribute("aria-expanded", String(open));
+      $("ai-dev-toggle").textContent = open ? "Hide" : "Show";
+      $("ai-dev-toggle").setAttribute("aria-label", `${open ? "Hide" : "Show"} devices in this analysis`);
+    });
+    $("ai-devices-panel").classList.add("is-folded");
+    $("ai-dev-toggle").setAttribute("aria-label", "Show devices in this analysis");
     $("ai-setup-toggle").addEventListener("click", () => {
       ai.showSetup = !ai.showSetup;
       aiSync();
