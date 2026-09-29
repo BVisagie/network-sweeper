@@ -1647,6 +1647,8 @@
     if (!ai.backendsLoaded) aiLoadBackends();
     aiRefreshPrompt();
     aiSync();
+    aiRenderThread();
+    requestAnimationFrame(aiReveal);
   }
 
   function aiRefreshPrompt() {
@@ -2009,6 +2011,21 @@
     }
   }
 
+  // aiReveal scrolls the page just enough to show the conversation with its
+  // reply box. When the panel is taller than the screen (phones), it shows
+  // the latest message from its start instead; the reply box follows it.
+  function aiReveal() {
+    if (!aiTalking() || $("tab-analyze").hidden) return;
+    const panel = $("ai-thread").closest(".ai-conversation");
+    const r = panel.getBoundingClientRect();
+    if (r.height <= window.innerHeight) {
+      if (r.top < 0 || r.bottom > window.innerHeight) panel.scrollIntoView({ block: r.top < 0 ? "start" : "end", behavior: "smooth" });
+      return;
+    }
+    const last = $("ai-thread").lastElementChild;
+    if (last) last.scrollIntoView({ block: "start", behavior: "smooth" });
+  }
+
   async function aiSend() {
     const cs = $("ai-chat-status");
     if (!ai.history.length) {
@@ -2024,9 +2041,7 @@
     cs.textContent = "";
     aiRenderThread();
     aiSync();
-    // The conversation now fills the screen: bring its reply box and Stop into view.
-    const panel = $("ai-thread").closest(".ai-conversation");
-    if (panel.getBoundingClientRect().bottom > window.innerHeight) panel.scrollIntoView({ block: "start", behavior: "smooth" });
+    aiReveal();
     ai.timer = setInterval(() => {
       const w = $("ai-wait");
       if (w) w.textContent = `Thinking… ${Math.round((Date.now() - ai.started) / 1000)} s (a first answer can take a minute or two)`;
@@ -2061,7 +2076,8 @@
     }
     aiRenderThread();
     aiSync();
-    if (ai.history.length) $("ai-reply").focus();
+    if (ai.history.length) $("ai-reply").focus({ preventScroll: true });
+    aiReveal();
   }
 
   function aiBind() {

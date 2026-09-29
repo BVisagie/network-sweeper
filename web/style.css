@@ -1881,18 +1881,22 @@ textarea.ai-prompt:disabled { opacity: 0.45; cursor: not-allowed; resize: none; 
   min-height: 22rem;
   margin-bottom: 0;
 }
-.ai-conversation.is-talking { height: calc(100vh - 2rem); min-height: 28rem; }
+/* In a conversation the panel fits its messages, so the reply box sits right
+   under the last one; past the screen height the messages scroll instead. */
+.ai-conversation.is-talking { max-height: calc(100vh - 2rem); min-height: 0; }
 .ai-conversation .panel-head { flex-wrap: wrap; }
 .ai-conversation .panel-head h3 { gap: 0.4rem; flex-wrap: wrap; }
 #ai-with { white-space: nowrap; font-weight: 400; }
 .ai-thread {
-  flex: 1;
+  flex: 0 1 auto;
+  min-height: 0;
   overflow-y: auto;
   padding: 1rem;
   display: flex;
   flex-direction: column;
   gap: 0.9rem;
 }
+.ai-conversation:not(.is-talking) .ai-thread { flex: 1; }
 .ai-empty {
   margin: auto;
   max-width: 30rem;
@@ -1960,8 +1964,8 @@ textarea.ai-prompt:disabled { opacity: 0.45; cursor: not-allowed; resize: none; 
   .ai-dev-ip { display: none; }
   .ai-conversation { order: 3; margin-bottom: 1rem; }
   .ai-p-prompt { order: 4; }
-  .ai-conversation, .ai-conversation.is-talking { position: static; height: auto; min-height: 0; }
-  .ai-thread { max-height: none; min-height: 12rem; }
+  .ai-conversation, .ai-conversation.is-talking { position: static; height: auto; max-height: none; min-height: 0; }
+  .ai-conversation:not(.is-talking) .ai-thread { min-height: 12rem; }
   .ai-hint { display: none; }
 }
 
