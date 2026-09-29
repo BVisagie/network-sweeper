@@ -1708,9 +1708,10 @@ body.modal-open { overflow: hidden; }
 }
 .analyze-side .panel:last-child { margin-bottom: 0; }
 .ai-stack { display: grid; gap: 0.7rem; }
-.ai-stack .check, .ai-stack .banner { margin: 0; }
+.ai-stack .check, .ai-stack .banner, .ai-stack > p { margin: 0; }
 .ai-masks { display: grid; gap: 0.1rem; }
-.ai-masks .check.inline { min-height: 2rem; }
+.ai-masks .check.inline, .check.inline.ai-ack { min-height: 2rem; }
+.check.inline.ai-ack { color: var(--fg); padding-top: 0.6rem; border-top: 1px solid var(--line); }
 .ai-consent-summary { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
 .ai-consent-summary p { margin: 0; font-size: 0.88rem; }
 .ai-ok { color: var(--accent); font-weight: 700; }

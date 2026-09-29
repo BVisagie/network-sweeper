@@ -214,12 +214,12 @@
               <div class="panel-head"><h3>Before you share</h3></div>
               <div class="panel-body ai-stack" id="ai-consent">
                 <p class="banner is-warn">What you share describes your network: its devices, open services, software versions, and possible weak spots. AI services may keep it, log it, or train on it. The Claude and Codex CLIs send it to Anthropic or OpenAI under your account; a local model server keeps it on this computer. Network Sweeper sends nothing on its own. Sharing is at your own risk.</p>
-                <label class="check"><input type="checkbox" id="ai-ack" /><span>I understand the risk of sharing this.</span></label>
                 <div class="ai-masks">
                   <label class="check inline"><input type="checkbox" id="ai-mask-macs" checked /><span>Mask MAC addresses</span></label>
                   <label class="check inline"><input type="checkbox" id="ai-mask-names" checked /><span>Mask names, hostnames, tags, and notes</span></label>
                 </div>
                 <p class="muted small">Masking keeps IP addresses, vendors, services, and findings, which the AI needs.</p>
+                <label class="check inline ai-ack"><input type="checkbox" id="ai-ack" /><span>I understand the risk of sharing this.</span></label>
               </div>
               <div class="panel-body ai-consent-summary" id="ai-consent-summary" hidden>
                 <p><span class="ai-ok" aria-hidden="true">✓</span> <span id="ai-consent-text"></span></p>

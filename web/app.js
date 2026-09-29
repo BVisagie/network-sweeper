@@ -1765,7 +1765,7 @@
     const b = aiBackend();
     if (!aiTalking()) {
       let text;
-      if (!$("ai-ack").checked) text = "Read the notice on the left and tick “I understand the risk” to begin.";
+      if (!$("ai-ack").checked) text = "Read the notice on the left, choose what to mask, then tick “I understand the risk” to begin.";
       else if (!ai.counts) text = "Building the prompt…";
       else if (!b?.available)
         text = ai.backends.some((x) => x.available)
@@ -1904,10 +1904,12 @@
       ai.consentOpen = !$("ai-ack").checked;
       aiSync();
     });
+    // Change reopens the notice unacknowledged: adjust the masks, then tick again.
     $("ai-consent-edit").addEventListener("click", () => {
+      $("ai-ack").checked = false;
       ai.consentOpen = true;
       aiSync();
-      $("ai-ack").focus();
+      $("ai-mask-macs").focus();
     });
     const remask = () => {
       ai.scanKey = aiScanKey();
