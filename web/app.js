@@ -368,7 +368,10 @@
     });
     if (focus) document.getElementById("tabbtn-" + id)?.focus();
     if (id === "changes") loadChanges();
-    if (id === "analyze") aiOpen();
+    if (id === "analyze") {
+      $("tabbtn-analyze").classList.remove("has-news");
+      aiOpen();
+    }
   }
 
   document.querySelectorAll(".tabs button").forEach((btn) => {
@@ -698,6 +701,7 @@
       $("profile-select").value = ""; // show the network just scanned
       await refreshAll();
       state.justScanned = false;
+      aiNudge();
       if (state.currentDeviceId && !$("modal").hidden) openDevice(state.currentDeviceId, false);
     }, 700);
     syncScanButton();
@@ -2184,6 +2188,18 @@
   }
 
   $("analyze-btn").addEventListener("click", () => activateTab("analyze"));
+
+  // aiNudge draws the eye to Analyze once a scan finishes: the button glows
+  // briefly, and the tab keeps a dot until it is opened.
+  function aiNudge() {
+    if (!state.inv?.latestScan) return;
+    const b = $("analyze-btn");
+    b.classList.remove("is-fresh");
+    void b.offsetWidth; // restart the animation
+    b.classList.add("is-fresh");
+    if ($("tab-analyze").hidden) $("tabbtn-analyze").classList.add("has-news");
+  }
+  $("analyze-btn").addEventListener("animationend", () => $("analyze-btn").classList.remove("is-fresh"));
   $("ai-rescan").addEventListener("click", () => {
     activateTab("devices", false);
     $("scan-btn").scrollIntoView({ block: "center" });

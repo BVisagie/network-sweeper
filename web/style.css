@@ -1695,6 +1695,39 @@ body.modal-open { overflow: hidden; }
 .annotate { display: grid; gap: 0.6rem; }
 
 /* Analyze tab: setup on the left, the conversation on the right. */
+/* Analyze with AI beside Scan: an accent outline, so it stands out without
+   competing with Scan. */
+button.ai-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border-color: rgba(62, 207, 142, 0.6);
+  background: linear-gradient(135deg, rgba(62, 207, 142, 0.18), rgba(62, 207, 142, 0.05));
+  color: var(--accent);
+  font-weight: 600;
+}
+button.ai-cta:hover {
+  border-color: var(--accent);
+  background: linear-gradient(135deg, rgba(62, 207, 142, 0.28), rgba(62, 207, 142, 0.1));
+}
+button.ai-cta svg { width: 1.05em; height: 1.05em; flex: none; }
+button.ai-cta.is-fresh { animation: ai-glow 1.4s var(--ease) 2; }
+@keyframes ai-glow {
+  0% { box-shadow: 0 0 0 0 rgba(62, 207, 142, 0.5); }
+  100% { box-shadow: 0 0 0 0.8rem rgba(62, 207, 142, 0); }
+}
+.tabs button.has-news::after {
+  content: "";
+  display: inline-block;
+  width: 0.45rem;
+  height: 0.45rem;
+  margin-left: 0.4rem;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+}
+
 .analyze-head { margin: 0 0 1rem; }
 .analyze-head h2 { margin: 0 0 0.3rem; font-size: 1.15rem; letter-spacing: -0.02em; }
 .analyze-head .help { margin: 0; max-width: 60rem; }
