@@ -53,12 +53,23 @@ func resolveChild(euid int, getenv func(string) string, lookup func(string) (*us
 	return &childID{cred: cred, home: u.HomeDir, user: u.Username}, nil
 }
 
-// tree contains a CLI and everything it starts. On Unix the process group
-// does that, set up before start.
-type tree struct{}
+// tree contains a CLI and everything it starts: its own process group, set
+// up before start, which Stop kills and which is cleaned up after every turn.
+type tree struct{ pgid int }
 
-func (*tree) started(*exec.Cmd) error { return nil }
-func (*tree) close()                  {}
+func (t *tree) started(cmd *exec.Cmd) error {
+	t.pgid = cmd.Process.Pid
+	return nil
+}
+
+// close ends anything the CLI left running once the turn is over, including
+// after a normal finish. The group ID stays reserved while any member lives,
+// so it cannot name an unrelated process.
+func (t *tree) close() {
+	if t.pgid > 0 {
+		_ = syscall.Kill(-t.pgid, syscall.SIGKILL)
+	}
+}
 
 // apply runs the command in its own process group, as the child identity,
 // and kills the whole group when the request is stopped.

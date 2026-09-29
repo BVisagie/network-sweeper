@@ -3,6 +3,7 @@
 package assistant
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -31,13 +32,31 @@ var (
 	procSetInformationJobObject  = kernel32.NewProc("SetInformationJobObject")
 	procAssignProcessToJobObject = kernel32.NewProc("AssignProcessToJobObject")
 	procTerminateJobObject       = kernel32.NewProc("TerminateJobObject")
+	procThread32First            = kernel32.NewProc("Thread32First")
+	procThread32Next             = kernel32.NewProc("Thread32Next")
+	procOpenThread               = kernel32.NewProc("OpenThread")
+	procResumeThread             = kernel32.NewProc("ResumeThread")
 )
 
 const (
 	jobObjectExtendedLimitInformation = 9
 	jobObjectLimitKillOnJobClose      = 0x2000
 	processSetQuota                   = 0x0100
+	createSuspended                   = 0x00000004
+	th32csSnapThread                  = 0x00000004
+	threadSuspendResume               = 0x0002
 )
+
+// threadEntry32 is THREADENTRY32.
+type threadEntry32 struct {
+	Size           uint32
+	Usage          uint32
+	ThreadID       uint32
+	OwnerProcessID uint32
+	BasePri        int32
+	DeltaPri       int32
+	Flags          uint32
+}
 
 // Layouts of JOBOBJECT_BASIC_LIMIT_INFORMATION, IO_COUNTERS and
 // JOBOBJECT_EXTENDED_LIMIT_INFORMATION.
@@ -76,6 +95,9 @@ type tree struct {
 
 func (c *childID) apply(cmd *exec.Cmd) *tree {
 	t := &tree{}
+	// Start suspended: the CLI runs only once it is in the job, so nothing
+	// it starts can be born outside it.
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createSuspended}
 	cmd.Cancel = func() error {
 		if t.terminate() {
 			return nil
@@ -85,9 +107,9 @@ func (c *childID) apply(cmd *exec.Cmd) *tree {
 	return t
 }
 
-// started puts the new process in a kill-on-close job. Processes it starts
-// from then on join the job too. It fails closed: a CLI that cannot be
-// contained does not run.
+// started puts the new, still suspended process in a kill-on-close job, then
+// lets it run. Everything it starts joins the job. It fails closed: a CLI
+// that cannot be contained, or resumed, is killed and does not run.
 func (t *tree) started(cmd *exec.Cmd) error {
 	job, _, err := procCreateJobObjectW.Call(0, 0)
 	if job == 0 {
@@ -112,6 +134,40 @@ func (t *tree) started(cmd *exec.Cmd) error {
 	t.mu.Lock()
 	t.job = syscall.Handle(job)
 	t.mu.Unlock()
+	if err := resumeProcess(uint32(cmd.Process.Pid)); err != nil {
+		return fmt.Errorf("could not start the AI process: %v", err)
+	}
+	return nil
+}
+
+// resumeProcess resumes the threads of a process created suspended. The
+// stdlib closes the main thread's handle, so the thread is found by snapshot.
+func resumeProcess(pid uint32) error {
+	snap, err := syscall.CreateToolhelp32Snapshot(th32csSnapThread, 0)
+	if err != nil {
+		return err
+	}
+	defer syscall.CloseHandle(snap)
+	e := threadEntry32{Size: uint32(unsafe.Sizeof(threadEntry32{}))}
+	resumed := 0
+	for ok, _, _ := procThread32First.Call(uintptr(snap), uintptr(unsafe.Pointer(&e))); ok != 0; ok, _, _ = procThread32Next.Call(uintptr(snap), uintptr(unsafe.Pointer(&e))) {
+		if e.OwnerProcessID != pid {
+			continue
+		}
+		h, _, err := procOpenThread.Call(threadSuspendResume, 0, uintptr(e.ThreadID))
+		if h == 0 {
+			return fmt.Errorf("open thread: %v", err)
+		}
+		r, _, err := procResumeThread.Call(h)
+		syscall.CloseHandle(syscall.Handle(h))
+		if uint32(r) == 0xFFFFFFFF {
+			return fmt.Errorf("resume thread: %v", err)
+		}
+		resumed++
+	}
+	if resumed == 0 {
+		return errors.New("its thread was not found")
+	}
 	return nil
 }
 

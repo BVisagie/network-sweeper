@@ -216,7 +216,7 @@ func (r runner) exec(ctx context.Context, stdin string, args ...string) ([]byte,
 	cmd.Stdin = strings.NewReader(stdin)
 	var stdout, stderr capped
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	cmd.WaitDelay = 5 * time.Second
+	cmd.WaitDelay = 2 * time.Second
 	tree := r.id.apply(cmd)
 	defer tree.close()
 	if err := cmd.Start(); err != nil {
@@ -228,6 +228,11 @@ func (r runner) exec(ctx context.Context, stdin string, args ...string) ([]byte,
 		return nil, err
 	}
 	err := cmd.Wait()
+	// A leftover child can hold the output pipes open after the CLI exits;
+	// the reply is complete, and tree.close ends that child.
+	if errors.Is(err, exec.ErrWaitDelay) {
+		err = nil
+	}
 	if ctx.Err() != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return nil, errors.New("the AI took too long and was stopped")
