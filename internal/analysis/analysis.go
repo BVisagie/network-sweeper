@@ -47,7 +47,6 @@ type Device struct {
 type Input struct {
 	AppVersion string
 	OS         string
-	Elevated   bool
 	Network    string // the profile's name
 	Scan       *inventory.Snapshot
 	Devices    []Device
@@ -73,7 +72,7 @@ type scanOut struct {
 	Methods         []string `json:"methods"`
 	DeepDiscovery   bool     `json:"deepDiscovery"`
 	CustomRange     bool     `json:"customRange,omitempty"`
-	Elevated        bool     `json:"ranAsAdministrator"`
+	Elevated        *bool    `json:"ranAsAdministrator,omitempty"` // left out when the scan did not record it
 	OS              string   `json:"scannerOs"`
 	GatewayIP       string   `json:"gatewayIp,omitempty"`
 	GatewayMAC      string   `json:"gatewayMac,omitempty"`
@@ -173,7 +172,7 @@ func Build(in Input, opt Options) (string, Stats) {
 		d.Masked = append(d.Masked, "MAC addresses (shown as mac-N)")
 	}
 	if opt.MaskNames {
-		d.Masked = append(d.Masked, "device names, hostnames, UPnP and certificate names (left out, and shown as the device reference in other text)", "owner notes and review notes")
+		d.Masked = append(d.Masked, "device names, hostnames, UPnP and certificate names (left out, and shown as the device reference in other text)", "owner tags, notes and review notes")
 	}
 
 	if s := in.Scan; s != nil {
@@ -182,7 +181,7 @@ func Build(in Input, opt Options) (string, Stats) {
 			DurationSeconds: s.DurationMs / 1000,
 			Ranges:          s.Coverage.Ranges, SkippedRanges: s.Coverage.Skipped, Addresses: s.Coverage.Addresses,
 			Methods: s.Coverage.Methods, DeepDiscovery: s.Coverage.Deep, CustomRange: s.Coverage.Custom,
-			Elevated: in.Elevated, OS: in.OS,
+			Elevated: s.Coverage.Elevated, OS: in.OS,
 			GatewayIP: s.GatewayIP, GatewayMAC: m.mac(s.GatewayMAC), Warning: m.text(s.Warning),
 		}
 	}
@@ -204,7 +203,6 @@ func Build(in Input, opt Options) (string, Stats) {
 			FoundVia:  h.AliveVia,
 			New:       dev.New,
 			FirstSeen: day(dev.FirstSeen, false),
-			Tags:      dev.Tags,
 			Ports:     []portOut{},
 			Findings:  []findingOut{},
 		}
@@ -212,7 +210,12 @@ func Build(in Input, opt Options) (string, Stats) {
 			o.DuplicateMACs = append(o.DuplicateMACs, m.mac(mac))
 		}
 		if !opt.MaskNames {
+			// Tags and notes are free-form, so they may hold names the
+			// free-text pass cannot know: masking names leaves them out.
 			o.Notes = m.text(dev.Notes)
+			for _, t := range dev.Tags {
+				o.Tags = append(o.Tags, m.text(t))
+			}
 		}
 		if h.IsSelf {
 			o.Roles = append(o.Roles, "the computer that ran the scan")
@@ -331,7 +334,14 @@ type masker struct {
 	devices []Device
 	refs    map[string]string // device ID -> device-N
 	macs    map[string]string // canonical MAC -> mac-N
-	names   []nameSub         // longest first
+	tails   []macTail
+	names   []nameSub // longest first
+}
+
+// macTail matches a MAC's last three bytes, as default network names show it.
+type macTail struct {
+	re    *regexp.Regexp
+	token string
 }
 
 type nameSub struct {
@@ -470,6 +480,8 @@ func (m *masker) macToken(s string) string {
 	}
 	t := fmt.Sprintf("mac-%d", len(m.macs)+1)
 	m.macs[c] = t
+	tail := strings.Split(c[len(c)-8:], ":")
+	m.tails = append(m.tails, macTail{regexp.MustCompile(`(?i)\b` + strings.Join(tail, "[:-]") + `\b`), t})
 	return t
 }
 
@@ -518,8 +530,8 @@ func (m *masker) text(s string) string {
 		// Bare hex and three-byte tails (default network names end in one)
 		// are only masked when they belong to a MAC we know.
 		s = macBare.ReplaceAllStringFunc(s, known)
-		for mac, t := range m.macs {
-			s = strings.ReplaceAll(s, mac[len(mac)-8:], t)
+		for _, t := range m.tails {
+			s = t.re.ReplaceAllLiteralString(s, t.token)
 		}
 	}
 	if m.opt.MaskNames {

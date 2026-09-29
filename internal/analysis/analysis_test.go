@@ -17,7 +17,7 @@ func fixture(banner string) Input {
 	laptop := Device{
 		Device: inventory.Device{
 			ID: "d-1", MAC: "aa:bb:cc:11:22:33", Name: "Bob Laptop", Notes: "spare key under the mat",
-			Tags: []string{"family"}, FirstSeen: at, LastScanID: "s-1",
+			Tags: []string{"family", "Bob's iPhone"}, FirstSeen: at, LastScanID: "s-1",
 			Last: &inventory.Observation{
 				Host: discover.Host{IP: "192.168.1.20", MAC: "aa:bb:cc:11:22:33", Hostname: "bobs-laptop.lan", UPnPFriendlyName: "Bob Media Share"},
 				Ports: []scan.OpenPort{{
@@ -36,7 +36,7 @@ func fixture(banner string) Input {
 		}},
 	}
 	return Input{
-		AppVersion: "test", OS: "linux", Network: "Smith Home",
+		AppVersion: "test", OS: "linux", Network: "Smith Home (gateway \u2026EF:00:01)",
 		Scan: &inventory.Snapshot{
 			ID: "s-1", State: "completed", FinishedAt: at, GatewayIP: "192.168.1.1", GatewayMAC: "de:ad:be:ef:00:01",
 			Coverage: inventory.Coverage{Ranges: []string{"192.168.1.0/24"}, Methods: []string{"tcp"}},
@@ -54,7 +54,7 @@ func fixture(banner string) Input {
 // secrets are the identifying strings in the fixture, lowercased.
 var secrets = []string{
 	"aa:bb:cc:11:22:33", "aa-bb-cc-11-22-33", "de:ad:be:ef:00:01", "bob laptop", "bobs-laptop",
-	"bob media share", "smithfamily", "smith home", "spare key", "bob uses this",
+	"bob media share", "smithfamily", "smith home", "spare key", "bob uses this", "bob's iphone", "ef:00:01",
 }
 
 func TestMaskingRemovesIdentifiersEverywhere(t *testing.T) {
@@ -66,13 +66,26 @@ func TestMaskingRemovesIdentifiersEverywhere(t *testing.T) {
 			t.Errorf("masked prompt still contains %q", s)
 		}
 	}
-	for _, want := range []string{`"ref":"device-1"`, `"mac":"mac-1"`, `"gatewayMac":"mac-2"`, "SSH-2.0-OpenSSH_9.6 device-1", `"tags":["family"]`} {
+	for _, want := range []string{`"ref":"device-1"`, `"mac":"mac-1"`, `"gatewayMac":"mac-2"`, "SSH-2.0-OpenSSH_9.6 device-1"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("masked prompt lacks %s", want)
 		}
 	}
 	if stats.Devices != 1 || stats.Findings != 1 {
 		t.Errorf("stats = %+v", stats)
+	}
+	if strings.Contains(out, "ranAsAdministrator") {
+		t.Error("prompt claims an elevation the scan did not record")
+	}
+
+	// MACs alone: an uppercase MAC tail in the network name is masked, and
+	// tags are shown.
+	out, _ = Build(in, Options{MaskMACs: true})
+	if strings.Contains(strings.ToLower(out), "ef:00:01") || !strings.Contains(out, "Smith Home (gateway \u2026mac-2)") {
+		t.Errorf("MAC tail not masked in the network name")
+	}
+	if !strings.Contains(out, `"tags":["family","Bob's iPhone"]`) {
+		t.Error("tags missing when only MACs are masked")
 	}
 
 	out, _ = Build(in, Options{})

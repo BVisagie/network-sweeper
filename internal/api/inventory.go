@@ -241,7 +241,6 @@ func (s *Server) handleAnalysisPrompt(w http.ResponseWriter, r *http.Request) {
 	in := analysis.Input{
 		AppVersion: version.Version,
 		OS:         runtime.GOOS,
-		Elevated:   s.Elevated,
 		Scan:       snap,
 	}
 	for _, p := range s.Store.Profiles() {

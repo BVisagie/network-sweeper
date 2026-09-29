@@ -26,6 +26,9 @@ type Coverage struct {
 	Methods   []string `json:"methods"`
 	Deep      bool     `json:"deep"`
 	Custom    bool     `json:"customRange"`
+	// Elevated records whether the scan ran with Admin/root. Nil in scans
+	// saved before it was recorded.
+	Elevated *bool `json:"elevated,omitempty"`
 }
 
 // Snapshot is one finished scan. Canceled and timed-out scans keep what they

@@ -1563,11 +1563,11 @@
     if (!latest) return;
     const profile = (state.inv.profiles || []).find((p) => p.id === state.inv.profileId);
     const html = `
-      <p class="banner is-warn">This prompt describes your network: its devices, open services, software versions, and possible weak spots. AI services may keep what you paste, log it, or train on it. Network Sweeper sends nothing itself. Masking hides MAC addresses, names, and notes, but IP addresses, vendors, and services stay. A model on your own computer, or a provider you trust, is safest. Sharing it is at your own risk.</p>
+      <p class="banner is-warn">This prompt describes your network: its devices, open services, software versions, and possible weak spots. AI services may keep what you paste, log it, or train on it. Network Sweeper sends nothing itself. Masking hides MAC addresses, names, tags, and notes, but IP addresses, vendors, and services stay. A model on your own computer, or a provider you trust, is safest. Sharing it is at your own risk.</p>
       <section class="detail-section ai-analysis">
         <div class="ai-masks">
           <label class="check inline"><input type="checkbox" id="ai-mask-macs" checked /><span>Mask MAC addresses</span></label>
-          <label class="check inline"><input type="checkbox" id="ai-mask-names" checked /><span>Mask device names, hostnames, and notes</span></label>
+          <label class="check inline"><input type="checkbox" id="ai-mask-names" checked /><span>Mask device names, hostnames, tags, and notes</span></label>
         </div>
         <label class="field"><span>Prompt <small class="muted">(check it, and edit it if you like; changing a mask rebuilds it)</small></span>
           <textarea id="ai-prompt" class="ai-prompt" rows="14" spellcheck="false" readonly>Building the prompt…</textarea></label>
