@@ -368,12 +368,13 @@
     });
     if (focus) document.getElementById("tabbtn-" + id)?.focus();
     if (id === "changes") loadChanges();
+    if (id === "analyze") aiOpen();
   }
 
   document.querySelectorAll(".tabs button").forEach((btn) => {
     btn.addEventListener("click", () => activateTab(btn.dataset.tab));
     btn.addEventListener("keydown", (e) => {
-      const tabs = [...document.querySelectorAll(".tabs button")];
+      const tabs = [...document.querySelectorAll(".tabs button")].filter((b) => !b.hidden);
       const i = tabs.indexOf(btn);
       let next = -1;
       if (e.key === "ArrowRight") next = (i + 1) % tabs.length;
@@ -575,6 +576,7 @@
     const running = !!state.polling;
     $("scan-btn").disabled = running || !(state.preview && state.preview.ok);
     $("analyze-btn").hidden = running || !state.inv?.latestScan;
+    syncAnalyzeTab();
   }
 
   $("targets").addEventListener("input", updatePreview);
@@ -1557,8 +1559,29 @@
 
   // ---------- AI analysis ----------
 
+  // The Analyze tab builds a prompt from the latest scan. After the user
+  // acknowledges the risk, it can be copied, or sent to an AI on this
+  // computer (the Claude or Codex CLI with tools off, or a local model
+  // server). The conversation lives here until the page is reloaded.
+
   const AI_BACKEND_KEY = "ns-ai-backend";
   const AI_LOCAL_KEY = "ns-ai-local-url";
+
+  const ai = {
+    bound: false,
+    counts: null, // prompt stats; null while the prompt is loading
+    seq: 0,
+    scanKey: "", // profile and scan the prompt was built from
+    backends: [],
+    backendsLoaded: false,
+    backend: "",
+    consentOpen: true,
+    prompt: "", // fixed at the first send
+    history: [], // assistant replies and the owner's answers, alternating
+    ctrl: null,
+    started: 0,
+    timer: null,
+  };
 
   function remembered(key, fallback = "") {
     try {
@@ -1576,270 +1599,325 @@
     }
   }
 
-  // Shows a prompt, for any AI model, built from the latest scan. The user
-  // reads the risk notice, then copies it, or sends it to an AI on this
-  // computer (the Claude or Codex CLI with tools off, or a local model server).
-  function openAnalysis() {
+  const aiTalking = () => ai.history.length > 0 || !!ai.ctrl;
+  const aiBackend = () => ai.backends.find((b) => b.id === ai.backend);
+  const aiScanKey = () => (state.inv?.latestScan ? (state.inv.profileId || "") + "|" + state.inv.latestScan.id : "");
+
+  // Keeps the tab in step with the inventory: shown once a scan exists, and
+  // its prompt rebuilt for a newer scan unless a conversation is under way.
+  function syncAnalyzeTab() {
     const latest = state.inv?.latestScan;
-    if (!latest) return;
-    const html = `
-      <p class="banner is-warn">This prompt describes your network: its devices, open services, software versions, and possible weak spots. AI services may keep what you share, log it, or train on it. Network Sweeper sends nothing itself: pasting it into a chat, or asking the Claude or Codex CLI below, shares it with that provider under your account, while a local model server keeps it on this computer. Masking hides MAC addresses, names, tags, and notes, but IP addresses, vendors, and services stay. A model on your own computer, or a provider you trust, is safest. Sharing it is at your own risk.</p>
-      <section class="detail-section ai-analysis">
-        <label class="check"><input type="checkbox" id="ai-ack" /><span>I understand the risk of sharing this.</span></label>
-        <div class="ai-masks">
-          <label class="check inline"><input type="checkbox" id="ai-mask-macs" checked /><span>Mask MAC addresses</span></label>
-          <label class="check inline"><input type="checkbox" id="ai-mask-names" checked /><span>Mask device names, hostnames, tags, and notes</span></label>
-        </div>
-        <label class="field"><span>Prompt <small class="muted">(unlocks once you tick the box above; you can edit it, and changing a mask rebuilds it)</small></span>
-          <textarea id="ai-prompt" class="ai-prompt" rows="14" spellcheck="false" disabled>Building the prompt…</textarea></label>
-        <p id="ai-stats" class="muted small"></p>
-        <p class="help">Paste it into any capable AI chat, or ask an AI on this computer below. The model will probably ask you a few questions about your network first; answering them gets you better advice. Take care what you share in those answers too.</p>
-        <div class="form-actions">
-          <button type="button" class="primary" id="ai-copy" disabled>Copy prompt</button>
-          <button type="button" class="ghost" id="ai-download" disabled>Download .md</button>
-          <span id="ai-status" class="status-line" aria-live="polite"></span>
-        </div>
-      </section>
-      <section class="detail-section ai-analysis">
-        <h3>Ask an AI on this computer</h3>
-        <fieldset class="ai-backends" id="ai-backends"><legend class="sr-only">AI to ask</legend><p class="muted small">Checking what is installed…</p></fieldset>
-        <div class="ai-local" id="ai-local" hidden>
-          <label class="field compact grow"><span>Server</span><input id="ai-local-url" type="text" spellcheck="false" autocomplete="off" placeholder="http://127.0.0.1:8080" /></label>
-          <label class="field compact"><span>Model</span><select id="ai-local-model"><option value="">Server default</option></select></label>
-          <button type="button" class="ghost compact" id="ai-local-check">Check</button>
-        </div>
-        <div id="ai-thread" class="ai-thread" hidden></div>
-        <label class="field" id="ai-reply-wrap" hidden><span>Your reply</span><textarea id="ai-reply" rows="3" maxlength="20000"></textarea></label>
-        <div class="form-actions">
-          <button type="button" class="primary" id="ai-send" disabled>Send prompt</button>
-          <button type="button" class="ghost" id="ai-stop" hidden>Stop</button>
-          <button type="button" class="ghost" id="ai-copy-chat" hidden>Copy conversation</button>
-          <button type="button" class="ghost" id="ai-reset" hidden>Start over</button>
-          <span id="ai-chat-status" class="status-line" aria-live="polite"></span>
-        </div>
-      </section>`;
-    openModal(`Analyze with AI · scan of ${fmtTime(latest.finishedAt)}`, "", html);
+    const btn = $("tabbtn-analyze");
+    btn.hidden = !latest && !aiTalking();
+    if (btn.hidden && !$("tab-analyze").hidden) activateTab("devices", false);
+    if (latest) $("ai-title").textContent = `Analyze with AI · scan of ${fmtTime(latest.finishedAt)}`;
+    if (!$("tab-analyze").hidden) aiRefreshPrompt();
+    aiSync();
+  }
 
-    const area = $("ai-prompt");
-    const status = $("ai-status");
-    let counts = null;
-    let seq = 0;
-    // chat.prompt is fixed at the first send; history alternates assistant
-    // replies and the owner's answers.
-    const chat = { backends: [], backend: "", prompt: "", history: [], ctrl: null, started: 0, timer: null };
-    const sync = () => {
-      // The prompt stays locked (no selecting, editing or copying by hand)
-      // until the risk is acknowledged.
-      const ok = !!counts && $("ai-ack").checked;
-      const talking = chat.history.length > 0 || !!chat.ctrl;
-      area.disabled = !ok || talking;
-      $("ai-mask-macs").disabled = talking;
-      $("ai-mask-names").disabled = talking;
-      $("ai-copy").disabled = !ok;
-      $("ai-download").disabled = !ok;
-      syncChat(ok);
-      $("ai-stats").textContent = counts
-        ? `About ${fmtNumber(Math.ceil(area.value.length / 4))} tokens · ${plural(counts.devices, "device")} · ${plural(counts.findings, "finding")}`
-        : "";
-    };
-    const load = async () => {
-      const mine = ++seq;
-      counts = null;
-      sync();
-      const q = new URLSearchParams({ maskMacs: $("ai-mask-macs").checked ? "1" : "0", maskNames: $("ai-mask-names").checked ? "1" : "0" });
-      if (state.inv.profileId) q.set("profile", state.inv.profileId);
-      try {
-        const res = await api("/api/analysis-prompt?" + q);
-        if (mine !== seq || !document.contains(area)) return;
-        area.value = res.prompt;
-        counts = res.stats;
-        status.textContent = "";
-      } catch (e) {
-        if (mine !== seq || !document.contains(area)) return;
-        area.value = "";
-        status.textContent = "Could not build the prompt: " + e.message;
-      }
-      sync();
-    };
-    const backendLabel = (id) => chat.backends.find((b) => b.id === id)?.label || "AI";
+  function aiOpen() {
+    aiBind();
+    if (!ai.backendsLoaded) aiLoadBackends();
+    aiRefreshPrompt();
+    aiSync();
+  }
 
-    function syncChat(ok) {
-      const busy = !!chat.ctrl;
-      const talking = chat.history.length > 0 || busy;
-      const b = chat.backends.find((x) => x.id === chat.backend);
-      document.querySelectorAll('input[name="ai-backend"]').forEach((r) => {
-        const info = chat.backends.find((x) => x.id === r.value);
-        r.disabled = !ok || talking || !(info?.available || info?.id === "local");
-      });
-      $("ai-local").hidden = chat.backend !== "local";
-      ["ai-local-url", "ai-local-model", "ai-local-check"].forEach((id) => ($(id).disabled = !ok || talking));
-      const replying = chat.history.length > 0;
-      $("ai-reply-wrap").hidden = !replying;
-      $("ai-reply").disabled = !ok || busy;
-      $("ai-send").textContent = replying ? "Send reply" : "Send prompt";
-      $("ai-send").disabled = !ok || busy || !b?.available || (replying && !$("ai-reply").value.trim());
-      $("ai-stop").hidden = !busy;
-      $("ai-copy-chat").hidden = !chat.history.length;
-      $("ai-reset").hidden = !chat.history.length || busy;
+  function aiRefreshPrompt() {
+    const key = aiScanKey();
+    if (!key || key === ai.scanKey || aiTalking()) return;
+    ai.scanKey = key;
+    aiLoadPrompt();
+  }
+
+  async function aiLoadPrompt() {
+    const mine = ++ai.seq;
+    ai.counts = null;
+    aiSync();
+    const q = new URLSearchParams({ maskMacs: $("ai-mask-macs").checked ? "1" : "0", maskNames: $("ai-mask-names").checked ? "1" : "0" });
+    if (state.inv?.profileId) q.set("profile", state.inv.profileId);
+    try {
+      const res = await api("/api/analysis-prompt?" + q);
+      if (mine !== ai.seq) return;
+      $("ai-prompt").value = res.prompt;
+      ai.counts = res.stats;
+      $("ai-status").textContent = "";
+    } catch (e) {
+      if (mine !== ai.seq) return;
+      $("ai-prompt").value = "";
+      $("ai-status").textContent = "Could not build the prompt: " + e.message;
     }
+    aiSync();
+  }
 
-    function renderBackends() {
-      const box = $("ai-backends");
-      box.innerHTML =
-        `<legend class="sr-only">AI to ask</legend>` +
-        chat.backends
-          .map(
-            (b) => `<label class="check ai-backend">
-              <input type="radio" name="ai-backend" value="${escapeHtml(b.id)}" ${b.id === chat.backend ? "checked" : ""} />
-              <span><strong>${escapeHtml(b.label)}</strong>${b.version ? ` <span class="muted small mono">${escapeHtml(b.version)}</span>` : ""}
-                <small class="${b.available ? "muted" : "ai-unavailable"}">${escapeHtml(b.available ? b.note : b.reason || "Not available.")}</small></span>
-            </label>`
-          )
-          .join("");
-      box.querySelectorAll('input[name="ai-backend"]').forEach((r) =>
+  async function aiLoadBackends() {
+    ai.backendsLoaded = true;
+    try {
+      const res = await api("/api/assistant?localUrl=" + encodeURIComponent($("ai-local-url").value.trim()));
+      ai.backends = res.backends || [];
+    } catch (e) {
+      $("ai-backends").innerHTML = `<legend class="sr-only">AI to ask</legend><p class="muted small">${escapeHtml("Could not check for AI tools: " + e.message)}</p>`;
+      ai.backendsLoaded = false;
+      return;
+    }
+    if (!ai.backends.some((b) => b.id === ai.backend && (b.available || b.id === "local"))) {
+      ai.backend = (ai.backends.find((b) => b.available) || ai.backends.find((b) => b.id === "local") || {}).id || "";
+    }
+    aiRenderBackends();
+  }
+
+  function aiRenderBackends() {
+    $("ai-backends").innerHTML =
+      `<legend class="sr-only">AI to ask</legend>` +
+      ai.backends
+        .map(
+          (b) => `<label class="ai-backend${b.available ? "" : " is-off"}">
+            <input type="radio" name="ai-backend" value="${escapeHtml(b.id)}" ${b.id === ai.backend ? "checked" : ""} />
+            <span class="ai-backend-text">
+              <span class="ai-backend-name">${escapeHtml(b.label)}${b.version ? ` <span class="muted mono">${escapeHtml(b.version.replace(/\s*\(.*\)$/, ""))}</span>` : ""}</span>
+              <small class="${b.available ? "muted" : "ai-unavailable"}">${escapeHtml(b.available ? b.note : b.reason || "Not available.")}</small>
+            </span>
+          </label>`
+        )
+        .join("");
+    $("ai-backends")
+      .querySelectorAll('input[name="ai-backend"]')
+      .forEach((r) =>
         r.addEventListener("change", () => {
-          chat.backend = r.value;
+          ai.backend = r.value;
           remember(AI_BACKEND_KEY, r.value);
-          sync();
+          aiSync();
         })
       );
-      const local = chat.backends.find((b) => b.id === "local");
-      const sel = $("ai-local-model");
-      const keep = sel.value;
-      sel.innerHTML =
-        `<option value="">Server default</option>` + (local?.models || []).map((m) => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
-      // Pick a listed model unless one was chosen: Ollama needs a model name.
-      if (keep && [...sel.options].some((o) => o.value === keep)) sel.value = keep;
-      else if (local?.models?.length) sel.value = local.models[0];
-      sync();
-    }
+    const local = ai.backends.find((b) => b.id === "local");
+    const sel = $("ai-local-model");
+    const keep = sel.value;
+    sel.innerHTML =
+      `<option value="">Server default</option>` + (local?.models || []).map((m) => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
+    // Pick a listed model unless one was chosen: Ollama needs a model name.
+    if (keep && [...sel.options].some((o) => o.value === keep)) sel.value = keep;
+    else if (local?.models?.length) sel.value = local.models[0];
+    aiSync();
+  }
 
-    async function loadBackends() {
-      try {
-        const res = await api("/api/assistant?localUrl=" + encodeURIComponent($("ai-local-url").value.trim()));
-        if (!document.contains(area)) return;
-        chat.backends = res.backends || [];
-      } catch (e) {
-        if (!document.contains(area)) return;
-        $("ai-backends").innerHTML = `<p class="muted small">${escapeHtml("Could not check for AI tools: " + e.message)}</p>`;
-        return;
-      }
-      if (!chat.backends.some((b) => b.id === chat.backend)) {
-        chat.backend = (chat.backends.find((b) => b.available) || chat.backends[0] || {}).id || "";
-      }
-      renderBackends();
-    }
+  function aiSync() {
+    if (!ai.bound) return;
+    const ack = $("ai-ack").checked;
+    const ok = !!ai.counts && ack;
+    const busy = !!ai.ctrl;
+    const talking = aiTalking();
+    const b = aiBackend();
+    const macs = $("ai-mask-macs").checked;
+    const names = $("ai-mask-names").checked;
 
-    function renderThread() {
-      const thread = $("ai-thread");
-      thread.hidden = !chat.history.length && !chat.ctrl;
-      const who = backendLabel(chat.backend);
-      const items = [`<div class="ai-msg ai-msg-user"><p class="context-label">You</p><p class="muted small">Sent the prompt above (about ${fmtNumber(Math.ceil(chat.prompt.length / 4))} tokens).</p></div>`];
-      for (const m of chat.history) {
-        items.push(
-          `<div class="ai-msg ai-msg-${m.role === "assistant" ? "ai" : "user"}"><p class="context-label">${escapeHtml(m.role === "assistant" ? who : "You")}</p><div class="ai-text">${escapeHtml(m.text)}</div></div>`
-        );
-      }
-      if (chat.ctrl) items.push(`<div class="ai-msg ai-msg-ai"><p class="context-label">${escapeHtml(who)}</p><p class="muted small" id="ai-wait">Thinking…</p></div>`);
-      thread.innerHTML = items.join("");
-      thread.scrollTop = thread.scrollHeight;
-    }
+    // Once acknowledged, the notice folds into one line.
+    const folded = ack && !ai.consentOpen;
+    $("ai-consent").hidden = folded;
+    $("ai-consent-summary").hidden = !folded;
+    $("ai-consent-text").textContent = `Risk acknowledged · MACs ${macs ? "masked" : "shown"} · names ${names ? "masked" : "shown"}`;
+    $("ai-mask-macs").disabled = talking;
+    $("ai-mask-names").disabled = talking;
 
-    async function send() {
-      const cs = $("ai-chat-status");
-      if (!chat.history.length) chat.prompt = area.value;
-      else chat.history.push({ role: "user", text: $("ai-reply").value.trim() });
-      const history = chat.history.slice();
-      chat.ctrl = new AbortController();
-      chat.started = Date.now();
-      cs.textContent = "";
-      renderThread();
-      sync();
-      chat.timer = setInterval(() => {
-        const w = $("ai-wait");
-        if (w) w.textContent = `Thinking… ${Math.round((Date.now() - chat.started) / 1000)} s (a first answer can take a minute or two)`;
-      }, 1000);
-      try {
-        const res = await api("/api/assistant/ask", {
-          method: "POST",
-          signal: chat.ctrl.signal,
-          body: JSON.stringify({
-            backend: chat.backend,
-            prompt: chat.prompt,
-            history,
-            localUrl: $("ai-local-url").value.trim(),
-            localModel: $("ai-local-model").value,
-          }),
-        });
-        chat.history.push({ role: "assistant", text: res.reply });
-        $("ai-reply").value = "";
-      } catch (e) {
-        // Keep the owner's unanswered reply in the box to send again.
-        if (history.length) $("ai-reply").value = chat.history.pop().text;
-        cs.textContent = e.name === "AbortError" ? "Stopped." : e.message;
-      } finally {
-        clearInterval(chat.timer);
-        chat.ctrl = null;
-      }
-      if (!document.contains(area)) return;
-      renderThread();
-      sync();
-      if (chat.history.length) $("ai-reply").focus();
-    }
+    const area = $("ai-prompt");
+    area.disabled = !ok || talking;
+    $("ai-copy").disabled = !ok;
+    $("ai-download").disabled = !ok;
+    $("ai-stats").textContent = ai.counts
+      ? `≈${fmtNumber(Math.ceil(area.value.length / 4))} tokens · ${plural(ai.counts.devices, "device")} · ${plural(ai.counts.findings, "finding")}`
+      : "";
 
-    $("ai-local-url").value = remembered(AI_LOCAL_KEY, "http://127.0.0.1:8080");
-    chat.backend = remembered(AI_BACKEND_KEY);
-    $("ai-local-check").addEventListener("click", () => {
-      remember(AI_LOCAL_KEY, $("ai-local-url").value.trim());
-      loadBackends();
+    document.querySelectorAll('input[name="ai-backend"]').forEach((r) => {
+      const info = ai.backends.find((x) => x.id === r.value);
+      r.disabled = talking || !(info?.available || info?.id === "local");
     });
-    $("ai-reply").addEventListener("input", sync);
-    $("ai-reply").addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !$("ai-send").disabled) send();
-    });
-    $("ai-send").addEventListener("click", send);
-    $("ai-stop").addEventListener("click", () => chat.ctrl?.abort());
-    $("ai-reset").addEventListener("click", () => {
-      if (!confirm("Start over? This conversation will be lost.")) return;
-      chat.history = [];
-      chat.prompt = "";
-      $("ai-chat-status").textContent = "";
-      renderThread();
-      sync();
-    });
-    $("ai-copy-chat").addEventListener("click", async () => {
-      const who = backendLabel(chat.backend);
-      const text = [chat.prompt, ...chat.history.map((m) => `## ${m.role === "assistant" ? who : "You"}\n\n${m.text}`)].join("\n\n");
-      try {
-        await navigator.clipboard.writeText(text);
-        $("ai-chat-status").textContent = "Conversation copied.";
-      } catch {
-        $("ai-chat-status").textContent = "Could not copy the conversation.";
-      }
-    });
-    modalGuard = () => {
-      if (!chat.history.length && !chat.ctrl) return true;
-      if (!confirm("Close and lose this conversation?")) return false;
-      chat.ctrl?.abort();
-      return true;
+    $("ai-local").hidden = ai.backend !== "local";
+    ["ai-local-url", "ai-local-model", "ai-local-check"].forEach((id) => ($(id).disabled = talking));
+
+    const replying = ai.history.length > 0;
+    $("ai-reply-wrap").hidden = !replying;
+    $("ai-reply").disabled = !ok || busy;
+    $("ai-hint").hidden = !replying || busy;
+    $("ai-send").textContent = replying ? "Send" : "Start analysis";
+    $("ai-send").disabled = !ok || busy || !b?.available || (replying && !$("ai-reply").value.trim());
+    $("ai-stop").hidden = !busy;
+    $("ai-copy-chat").hidden = !replying;
+    $("ai-reset").hidden = !replying || busy;
+    $("ai-with").textContent = talking && b ? "· " + b.label : "";
+
+    const newer = talking && ai.scanKey && aiScanKey() && aiScanKey() !== ai.scanKey;
+    $("ai-note").hidden = !newer;
+    $("ai-note").textContent = newer ? "A newer scan is available. Start over to analyze it." : "";
+    if (!talking) aiRenderThread();
+  }
+
+  function aiRenderThread() {
+    const thread = $("ai-thread");
+    const b = aiBackend();
+    if (!aiTalking()) {
+      let text;
+      if (!$("ai-ack").checked) text = "Read the notice on the left and tick “I understand the risk” to begin.";
+      else if (!ai.counts) text = "Building the prompt…";
+      else if (!b?.available)
+        text = ai.backends.some((x) => x.available)
+          ? "Choose an AI on the left."
+          : "No AI was found on this computer. Install the Claude or Codex CLI, start a local model server, or copy the prompt into any AI chat.";
+      else text = `Start analysis sends the prompt (≈${fmtNumber(Math.ceil($("ai-prompt").value.length / 4))} tokens) to ${b.label}. It will probably ask you a few questions first; answer them here.`;
+      thread.innerHTML = `<div class="ai-empty"><p>${escapeHtml(text)}</p></div>`;
+      return;
+    }
+    const who = b?.label || "AI";
+    const items = [`<div class="ai-msg ai-msg-user"><p class="ai-who">You</p><p class="muted small">Sent the prompt (≈${fmtNumber(Math.ceil(ai.prompt.length / 4))} tokens).</p></div>`];
+    for (const m of ai.history) {
+      items.push(
+        m.role === "assistant"
+          ? `<div class="ai-msg ai-msg-ai"><p class="ai-who">${escapeHtml(who)}</p><div class="ai-md">${renderMarkdown(m.text)}</div></div>`
+          : `<div class="ai-msg ai-msg-user"><p class="ai-who">You</p><div class="ai-plain">${escapeHtml(m.text)}</div></div>`
+      );
+    }
+    if (ai.ctrl) items.push(`<div class="ai-msg ai-msg-ai"><p class="ai-who">${escapeHtml(who)}</p><p class="muted small ai-wait" id="ai-wait">Thinking…</p></div>`);
+    thread.innerHTML = items.join("");
+    thread.scrollTop = thread.scrollHeight;
+  }
+
+  // renderMarkdown shows a reply's headings, lists, emphasis and code. The
+  // text is escaped first and only these fixed tags are added: no links, no
+  // images, no raw HTML.
+  function renderMarkdown(src) {
+    const inline = (s) =>
+      s
+        .split(/`([^`]+)`/)
+        .map((part, i) =>
+          i % 2
+            ? `<code>${part}</code>`
+            : part.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replace(/(^|[\s(])[*_]([^*_\s][^*_]*?)[*_](?=[\s).,:;!?]|$)/g, "$1<em>$2</em>")
+        )
+        .join("");
+    const out = [];
+    let para = [];
+    let list = null; // { tag, items: [] }
+    let code = null;
+    let table = null;
+    const flush = () => {
+      if (para.length) out.push(`<p>${inline(para.join(" "))}</p>`);
+      para = [];
+      if (list) out.push(`<${list.tag}>${list.items.map((it) => `<li>${inline(it)}</li>`).join("")}</${list.tag}>`);
+      list = null;
+      if (table) out.push(`<pre class="ai-table">${table.join("\n")}</pre>`);
+      table = null;
     };
-    loadBackends();
+    for (const line of escapeHtml(src).split("\n")) {
+      if (code) {
+        if (/^\s*```/.test(line)) {
+          out.push(`<pre><code>${code.join("\n")}</code></pre>`);
+          code = null;
+        } else code.push(line);
+        continue;
+      }
+      let m;
+      if (/^\s*```/.test(line)) {
+        flush();
+        code = [];
+      } else if (/^\s*\|/.test(line)) {
+        if (!table) flush();
+        (table ||= []).push(line.trim());
+      } else if ((m = line.match(/^(#{1,6})\s+(.*)$/))) {
+        flush();
+        out.push(`<h4 class="ai-h${Math.min(m[1].length, 3)}">${inline(m[2])}</h4>`);
+      } else if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) {
+        flush();
+      } else if ((m = line.match(/^\s*([-*+]|\d+[.)])\s+(.*)$/))) {
+        const tag = /\d/.test(m[1]) ? "ol" : "ul";
+        if (para.length || table || (list && list.tag !== tag && !/^\s{2,}/.test(line))) flush();
+        if (!list) list = { tag, items: [] };
+        list.items.push(m[2]);
+      } else if (!line.trim()) {
+        flush();
+      } else if (list && /^\s+\S/.test(line)) {
+        list.items[list.items.length - 1] += " " + line.trim();
+      } else {
+        if (list || table) flush();
+        para.push(line.trim());
+      }
+    }
+    if (code) out.push(`<pre><code>${code.join("\n")}</code></pre>`);
+    flush();
+    return out.join("");
+  }
 
-    $("ai-mask-macs").addEventListener("change", load);
-    $("ai-mask-names").addEventListener("change", load);
-    $("ai-ack").addEventListener("change", sync);
-    area.addEventListener("input", sync);
+  async function aiSend() {
+    const cs = $("ai-chat-status");
+    if (!ai.history.length) ai.prompt = $("ai-prompt").value;
+    else ai.history.push({ role: "user", text: $("ai-reply").value.trim() });
+    const history = ai.history.slice();
+    ai.ctrl = new AbortController();
+    ai.started = Date.now();
+    cs.textContent = "";
+    aiRenderThread();
+    aiSync();
+    ai.timer = setInterval(() => {
+      const w = $("ai-wait");
+      if (w) w.textContent = `Thinking… ${Math.round((Date.now() - ai.started) / 1000)} s (a first answer can take a minute or two)`;
+    }, 1000);
+    try {
+      const res = await api("/api/assistant/ask", {
+        method: "POST",
+        signal: ai.ctrl.signal,
+        body: JSON.stringify({
+          backend: ai.backend,
+          prompt: ai.prompt,
+          history,
+          localUrl: $("ai-local-url").value.trim(),
+          localModel: $("ai-local-model").value,
+        }),
+      });
+      ai.history.push({ role: "assistant", text: res.reply });
+      $("ai-reply").value = "";
+    } catch (e) {
+      // Keep the owner's unanswered reply in the box to send again.
+      if (history.length) $("ai-reply").value = ai.history.pop().text;
+      cs.textContent = e.name === "AbortError" ? "Stopped." : e.message;
+    } finally {
+      clearInterval(ai.timer);
+      ai.ctrl = null;
+    }
+    aiRenderThread();
+    aiSync();
+    if (ai.history.length) $("ai-reply").focus();
+  }
+
+  function aiBind() {
+    if (ai.bound) return;
+    ai.bound = true;
+    $("ai-local-url").value = remembered(AI_LOCAL_KEY, "http://127.0.0.1:8080");
+    ai.backend = remembered(AI_BACKEND_KEY);
+    $("ai-ack").addEventListener("change", () => {
+      ai.consentOpen = !$("ai-ack").checked;
+      aiSync();
+    });
+    $("ai-consent-edit").addEventListener("click", () => {
+      ai.consentOpen = true;
+      aiSync();
+      $("ai-ack").focus();
+    });
+    const remask = () => {
+      ai.scanKey = aiScanKey();
+      aiLoadPrompt();
+    };
+    $("ai-mask-macs").addEventListener("change", remask);
+    $("ai-mask-names").addEventListener("change", remask);
+    $("ai-prompt").addEventListener("input", aiSync);
     $("ai-copy").addEventListener("click", async () => {
+      const area = $("ai-prompt");
       try {
         await navigator.clipboard.writeText(area.value);
-        status.textContent = "Copied. Paste it into the AI chat you chose.";
+        $("ai-status").textContent = "Copied.";
       } catch {
+        $("ai-prompt-details").open = true;
         area.select();
-        status.textContent = document.execCommand("copy") ? "Copied. Paste it into the AI chat you chose." : "Could not copy. Select the text and copy it yourself.";
+        $("ai-status").textContent = document.execCommand("copy") ? "Copied." : "Could not copy. Select the text and copy it yourself.";
       }
     });
     $("ai-download").addEventListener("click", () => {
-      const url = URL.createObjectURL(new Blob([area.value], { type: "text/markdown" }));
+      const url = URL.createObjectURL(new Blob([$("ai-prompt").value], { type: "text/markdown" }));
       const a = document.createElement("a");
       a.href = url;
       a.download = "network-sweeper-analysis-prompt.md";
@@ -1848,9 +1926,40 @@
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     });
-    load();
+    $("ai-local-check").addEventListener("click", () => {
+      remember(AI_LOCAL_KEY, $("ai-local-url").value.trim());
+      aiLoadBackends();
+    });
+    $("ai-reply").addEventListener("input", aiSync);
+    $("ai-reply").addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !$("ai-send").disabled) aiSend();
+    });
+    $("ai-send").addEventListener("click", aiSend);
+    $("ai-stop").addEventListener("click", () => ai.ctrl?.abort());
+    $("ai-reset").addEventListener("click", () => {
+      if (!confirm("Start over? This conversation will be lost.")) return;
+      ai.history = [];
+      ai.prompt = "";
+      $("ai-chat-status").textContent = "";
+      aiRefreshPrompt();
+      aiSync();
+    });
+    $("ai-copy-chat").addEventListener("click", async () => {
+      const who = aiBackend()?.label || "AI";
+      const text = [ai.prompt, ...ai.history.map((m) => `## ${m.role === "assistant" ? who : "You"}\n\n${m.text}`)].join("\n\n");
+      try {
+        await navigator.clipboard.writeText(text);
+        $("ai-chat-status").textContent = "Conversation copied.";
+      } catch {
+        $("ai-chat-status").textContent = "Could not copy the conversation.";
+      }
+    });
+    window.addEventListener("beforeunload", (e) => {
+      if (aiTalking()) e.preventDefault();
+    });
   }
-  $("analyze-btn").addEventListener("click", openAnalysis);
+
+  $("analyze-btn").addEventListener("click", () => activateTab("analyze"));
 
   // ---------- export ----------
 
@@ -1876,8 +1985,6 @@
   // ---------- modal ----------
 
   let modalReturnFocus = null;
-  // modalGuard, when set, can keep the modal open (returns false) or tidy up.
-  let modalGuard = null;
 
   function openModal(title, sub, html, focus = true) {
     const modal = $("modal");
@@ -1896,8 +2003,6 @@
   function closeModal() {
     const modal = $("modal");
     if (modal.hidden) return;
-    if (modalGuard && !modalGuard()) return;
-    modalGuard = null;
     modal.hidden = true;
     document.body.classList.remove("modal-open");
     $("modal-body").innerHTML = "";

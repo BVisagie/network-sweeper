@@ -63,6 +63,7 @@
         <button type="button" role="tab" id="tabbtn-devices" data-tab="devices" class="active" aria-selected="true" aria-controls="tab-devices">Devices</button>
         <button type="button" role="tab" id="tabbtn-changes" data-tab="changes" aria-selected="false" aria-controls="tab-changes" tabindex="-1">Changes</button>
         <button type="button" role="tab" id="tabbtn-findings" data-tab="findings" aria-selected="false" aria-controls="tab-findings" tabindex="-1">Findings</button>
+        <button type="button" role="tab" id="tabbtn-analyze" data-tab="analyze" aria-selected="false" aria-controls="tab-analyze" tabindex="-1" hidden>Analyze</button>
         <button type="button" role="tab" id="tabbtn-settings" data-tab="settings" aria-selected="false" aria-controls="tab-settings" tabindex="-1">Settings</button>
       </nav>
 
@@ -193,6 +194,82 @@
             <div id="sev-filters" class="chip-row filters" role="group" aria-label="Filter by severity"></div>
             <div id="findings" class="findings-body">
               <p class="empty">No findings yet. Run a scan from Devices.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-analyze" class="tab" role="tabpanel" hidden aria-labelledby="tabbtn-analyze">
+        <div class="analyze-head">
+          <h2 id="ai-title">Analyze with AI</h2>
+          <p class="help">Get a plain-language review of this scan, and advice on protecting your network, from an AI you choose. It will probably ask you a few questions about your network first.</p>
+        </div>
+        <div class="analyze-grid">
+          <div class="analyze-side">
+            <div class="panel ai-p-consent">
+              <div class="panel-head"><h3>Before you share</h3></div>
+              <div class="panel-body ai-stack" id="ai-consent">
+                <p class="banner is-warn">What you share describes your network: its devices, open services, software versions, and possible weak spots. AI services may keep it, log it, or train on it. The Claude and Codex CLIs send it to Anthropic or OpenAI under your account; a local model server keeps it on this computer. Network Sweeper sends nothing on its own. Sharing is at your own risk.</p>
+                <label class="check"><input type="checkbox" id="ai-ack" /><span>I understand the risk of sharing this.</span></label>
+                <div class="ai-masks">
+                  <label class="check inline"><input type="checkbox" id="ai-mask-macs" checked /><span>Mask MAC addresses</span></label>
+                  <label class="check inline"><input type="checkbox" id="ai-mask-names" checked /><span>Mask names, hostnames, tags, and notes</span></label>
+                </div>
+                <p class="muted small">Masking keeps IP addresses, vendors, services, and findings, which the AI needs.</p>
+              </div>
+              <div class="panel-body ai-consent-summary" id="ai-consent-summary" hidden>
+                <p><span class="ai-ok" aria-hidden="true">✓</span> <span id="ai-consent-text"></span></p>
+                <button type="button" class="text-link" id="ai-consent-edit">Change</button>
+              </div>
+            </div>
+
+            <div class="panel ai-p-backend">
+              <div class="panel-head"><h3>AI to ask</h3></div>
+              <div class="panel-body ai-stack">
+                <fieldset class="ai-backends" id="ai-backends"><legend class="sr-only">AI to ask</legend><p class="muted small">Checking what is installed…</p></fieldset>
+                <div class="ai-local" id="ai-local" hidden>
+                  <label class="field compact grow"><span>Server</span><input id="ai-local-url" type="text" spellcheck="false" autocomplete="off" placeholder="http://127.0.0.1:8080" /></label>
+                  <label class="field compact"><span>Model</span><select id="ai-local-model"><option value="">Server default</option></select></label>
+                  <button type="button" class="ghost compact" id="ai-local-check">Check</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel ai-p-prompt">
+              <div class="panel-head"><h3>Prompt</h3><span id="ai-stats" class="muted small"></span></div>
+              <div class="panel-body ai-stack">
+                <details class="ai-prompt-details" id="ai-prompt-details">
+                  <summary>Review or edit what will be shared</summary>
+                  <textarea id="ai-prompt" class="ai-prompt" rows="14" spellcheck="false" aria-label="Prompt" disabled>Building the prompt…</textarea>
+                </details>
+                <p class="muted small">Using another AI? Copy the prompt and paste it into any capable chat.</p>
+                <div class="form-actions">
+                  <button type="button" class="ghost compact" id="ai-copy" disabled>Copy prompt</button>
+                  <button type="button" class="ghost compact" id="ai-download" disabled>Download .md</button>
+                  <span id="ai-status" class="status-line" aria-live="polite"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel ai-conversation">
+            <div class="panel-head">
+              <h3>Conversation <span id="ai-with" class="muted small"></span></h3>
+              <div class="head-actions">
+                <button type="button" class="ghost compact" id="ai-copy-chat" hidden>Copy</button>
+                <button type="button" class="ghost compact" id="ai-reset" hidden>Start over</button>
+              </div>
+            </div>
+            <div id="ai-thread" class="ai-thread" aria-live="polite"></div>
+            <div class="ai-composer">
+              <p id="ai-note" class="banner is-warn" hidden></p>
+              <label class="field" id="ai-reply-wrap" hidden><span class="sr-only">Your reply</span><textarea id="ai-reply" rows="3" maxlength="20000" placeholder="Answer the questions, or ask for the assessment…"></textarea></label>
+              <div class="form-actions">
+                <button type="button" class="primary" id="ai-send" disabled>Start analysis</button>
+                <button type="button" class="ghost" id="ai-stop" hidden>Stop</button>
+                <span id="ai-chat-status" class="status-line" aria-live="polite"></span>
+                <span class="muted small ai-hint" id="ai-hint" hidden>Ctrl+Enter to send</span>
+              </div>
             </div>
           </div>
         </div>
