@@ -1561,7 +1561,6 @@
   function openAnalysis() {
     const latest = state.inv?.latestScan;
     if (!latest) return;
-    const profile = (state.inv.profiles || []).find((p) => p.id === state.inv.profileId);
     const html = `
       <p class="banner is-warn">This prompt describes your network: its devices, open services, software versions, and possible weak spots. AI services may keep what you paste, log it, or train on it. Network Sweeper sends nothing itself. Masking hides MAC addresses, names, tags, and notes, but IP addresses, vendors, and services stay. A model on your own computer, or a provider you trust, is safest. Sharing it is at your own risk.</p>
       <section class="detail-section ai-analysis">
@@ -1580,7 +1579,7 @@
           <span id="ai-status" class="status-line" aria-live="polite"></span>
         </div>
       </section>`;
-    openModal("Analyze with AI", `${profile ? profile.name + " · " : ""}scan of ${fmtTime(latest.finishedAt)}`, html);
+    openModal(`Analyze with AI · scan of ${fmtTime(latest.finishedAt)}`, "", html);
 
     const area = $("ai-prompt");
     const status = $("ai-status");

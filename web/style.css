@@ -1418,6 +1418,7 @@ body.modal-open { overflow: hidden; }
   font-family: var(--mono);
   font-size: 0.82rem;
 }
+.modal-sub:empty { display: none; }
 
 .modal-close {
   min-height: 2.1rem;
