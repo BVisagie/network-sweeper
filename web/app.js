@@ -1049,7 +1049,10 @@
         if (h.isSelf) badges.push(`<span class="tag-pill self">This device</span>`);
         if (h.isGateway) badges.push(`<span class="tag-pill gw">Gateway</span>`);
         if (d.uncertain?.length) badges.push(`<span class="tag-pill guess" title="${escapeHtml(d.uncertain.join(" "))}">Identity uncertain</span>`);
-        if (drafts.has(d.id)) badges.push(`<span class="tag-pill draft" title="Its name, tags or notes have unsaved changes">Unsaved</span>`);
+        if (drafts.has(d.id)) {
+          const title = drafts.get(d.id).unwritten ? "Its name, tags or notes are not saved to disk yet" : "Its name, tags or notes have unsaved changes";
+          badges.push(`<span class="tag-pill draft" title="${title}">Unsaved</span>`);
+        }
         const badgeHtml = badges.join("");
         const tags = (d.tags || []).map((t) => `<span class="tag-pill user">${escapeHtml(t)}</span>`).join("");
         const findings = (d.findings || []).length
@@ -1218,7 +1221,10 @@
     saving: false,
     rescanning: "", // device whose rescan the inspector started
   };
-  const drafts = new Map(); // device id -> { name, tags, notes, label }
+  // device id -> { name, tags, notes, label, unwritten }. `unwritten` marks
+  // edits the server kept in memory but could not write to disk: they stay a
+  // draft until a save reaches the disk, even where the fields now match.
+  const drafts = new Map();
   const reviewNotes = new Map(); // "deviceId|findingKey" -> acknowledgement note not yet sent
 
   const annotationsOf = (d) => ({ name: d?.name || "", tags: (d?.tags || []).join(", "), notes: d?.notes || "" });
@@ -1329,7 +1335,13 @@
       syncInspectorBar();
       return true;
     }
-    return choice === "save" ? saveAllDrafts() : false;
+    if (choice !== "save" || !(await saveAllDrafts())) return false;
+    if (drafts.size) {
+      // Typed while the save was in flight: those are still unsaved.
+      $("insp-status").textContent = "You made more changes while saving. Save or discard them first.";
+      return false;
+    }
+    return true;
   }
 
   function askUnsaved(action) {
@@ -1348,9 +1360,10 @@
     if (!id) return;
     const cur = { name: $("insp-name").value, tags: $("insp-tags").value, notes: $("insp-notes").value };
     const base = baseDevice(id);
-    const had = drafts.has(id);
-    if (sameAnnotations(cur, annotationsOf(base))) drafts.delete(id);
-    else drafts.set(id, { ...cur, label: cur.name.trim() || devName(base || {}) || devIP(base || {}) || "this device" });
+    const prev = drafts.get(id);
+    const had = !!prev;
+    if (sameAnnotations(cur, annotationsOf(base)) && !prev?.unwritten) drafts.delete(id);
+    else drafts.set(id, { ...cur, label: cur.name.trim() || devName(base || {}) || devIP(base || {}) || "this device", unwritten: !!prev?.unwritten });
     if (had !== drafts.has(id)) renderDevices(); // the row's Unsaved mark
     syncInspectorBar();
   }
@@ -1380,9 +1393,10 @@
   }
 
   function syncInspectorBar() {
-    const dirty = drafts.has(insp.id);
-    $("insp-save").disabled = !dirty || insp.saving;
-    $("insp-dirty").hidden = !dirty;
+    const draft = drafts.get(insp.id);
+    $("insp-save").disabled = !draft || insp.saving;
+    $("insp-dirty").hidden = !draft;
+    $("insp-dirty").textContent = draft?.unwritten ? "Not saved to disk" : "Unsaved changes";
     const running = !!state.polling;
     const ip = devIP(baseDevice(insp.id) || {});
     $("insp-rescan").textContent = running ? "Stop scan" : "Rescan";
@@ -1390,25 +1404,44 @@
     $("insp-rescan").title = running ? "Stop the scan that is running" : ip ? `Scan ${ip} again` : "";
   }
 
+  // saveDraft sends a device's draft. It clears the draft only when what was
+  // sent is still the latest edit and it reached the disk. Edits typed while
+  // the request was in flight stay a draft, and so do edits the server kept
+  // in memory but could not write (saveError), so Save can try again.
   async function saveDraft(id) {
-    const dr = drafts.get(id);
-    if (!dr) return { ok: true };
-    const tags = dr.tags
+    const sent = drafts.get(id);
+    if (!sent) return { ok: true };
+    const tags = sent.tags
       .split(",")
       .map((t) => t.trim())
       .filter(Boolean);
+    let res;
     try {
-      const res = await post("/api/devices/" + encodeURIComponent(id), { name: dr.name, notes: dr.notes, tags });
-      drafts.delete(id);
-      if (id === insp.id && res.device) {
-        insp.device = res.device;
-        fillAnnotations(id, res.device, false);
-        fillHeader(res.device);
-      }
-      return { ok: true, note: res.saveError ? "Changed for this session, but saving failed: " + res.saveError : "" };
+      res = await post("/api/devices/" + encodeURIComponent(id), { name: sent.name, notes: sent.notes, tags });
     } catch (e) {
-      return { ok: false, error: e.message, label: dr.label }; // the draft stays
+      return { ok: false, error: e.message, label: sent.label }; // the draft stays
     }
+    const saved = res.device;
+    const shown = id === insp.id && saved;
+    if (shown) {
+      insp.device = saved;
+      fillHeader(saved);
+    }
+    const now = drafts.get(id);
+    if (res.saveError) {
+      drafts.set(id, { ...(now || sent), unwritten: true });
+      return { ok: false, error: `it was changed for this session but not written to disk (${res.saveError})`, label: sent.label };
+    }
+    if (now === sent) {
+      drafts.delete(id);
+      if (shown) fillAnnotations(id, saved, false);
+    } else if (now) {
+      // Newer edits: they stay unless they match what was just saved.
+      const newer = { ...now, unwritten: false };
+      if (saved && sameAnnotations(newer, annotationsOf(saved))) drafts.delete(id);
+      else drafts.set(id, newer);
+    }
+    return { ok: true, newer: drafts.has(id) };
   }
 
   async function saveCurrent() {
@@ -1418,19 +1451,21 @@
     $("insp-status").textContent = "Saving…";
     const r = await saveDraft(insp.id);
     insp.saving = false;
-    $("insp-status").textContent = r.ok ? r.note || "Saved." : `Could not save: ${r.error}. Your changes are kept; try again.`;
+    $("insp-status").textContent = !r.ok
+      ? `Could not save: ${r.error}. Your changes are kept; try again.`
+      : r.newer
+        ? "Saved. Your newer changes are not saved yet."
+        : "Saved.";
     syncInspectorBar();
-    if (r.ok) await loadInventory();
+    await loadInventory(); // the list shows what the server now holds
   }
   $("insp-save").addEventListener("click", saveCurrent);
 
   async function saveAllDrafts() {
     const failed = [];
-    const notes = [];
     for (const id of [...drafts.keys()]) {
       const r = await saveDraft(id);
       if (!r.ok) failed.push(`${r.label}: ${r.error}`);
-      else if (r.note) notes.push(r.note);
     }
     await loadInventory();
     syncInspectorBar();
@@ -1438,7 +1473,6 @@
       $("insp-status").textContent = `Could not save ${failed.join("; ")}. Those changes are kept.`;
       return false;
     }
-    if (notes.length) $("insp-status").textContent = notes[0];
     return true;
   }
 
