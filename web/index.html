@@ -221,8 +221,10 @@
           </div>
           <div class="panel-body">
             <p class="help">Each finding says how sure it is. <strong>Confirmed</strong> means a device's response backs it; <strong>inferred</strong> means only an open port does. Severity says how much it would matter if true.</p>
-            <div id="status-filters" class="chip-row filters" role="group" aria-label="Filter by review status"></div>
-            <div id="sev-filters" class="chip-row filters" role="group" aria-label="Filter by severity"></div>
+            <div class="findings-filters">
+              <div class="filter-group"><span class="bar-label" aria-hidden="true">Review</span><div id="status-filters" class="chip-row" role="group" aria-label="Filter by review status"></div></div>
+              <div class="filter-group"><span class="bar-label" aria-hidden="true">Severity</span><div id="sev-filters" class="chip-row" role="group" aria-label="Filter by severity"></div></div>
+            </div>
             <div id="findings" class="findings-body">
               <p class="empty">No findings yet. Run a scan from Devices.</p>
             </div>
@@ -241,20 +243,25 @@
         </div>
         <div class="ai-setup-bar" id="ai-setup-bar" hidden>
           <span><span class="ai-ok" aria-hidden="true">✓</span> <span id="ai-setup-text"></span></span>
-          <button type="button" class="text-link" id="ai-setup-toggle">View setup and prompt</button>
+          <button type="button" class="ghost disclosure" id="ai-setup-toggle" aria-expanded="false" aria-controls="ai-consent-panel ai-backend-panel ai-prompt-panel">Setup and prompt</button>
         </div>
         <div class="analyze-grid">
           <div class="analyze-side">
             <div class="panel ai-p-devices" id="ai-devices-panel" hidden>
-              <div class="panel-head"><h3>Devices in this analysis <span id="ai-dev-count" class="count-pill">0</span></h3></div>
-              <div class="panel-body ai-dev-filter">
-                <label class="field compact grow"><span class="sr-only">Filter devices</span><input id="ai-dev-filter" type="search" placeholder="Filter by reference, name, IP, vendor…" autocomplete="off" /></label>
-                <p class="muted small">Names here stay on this computer: the AI only sees the references. Click a device for its details; ↵ mentions it in your reply.</p>
+              <div class="panel-head">
+                <h3 id="ai-dev-heading">Devices in this analysis <span id="ai-dev-count" class="count-pill">0</span></h3>
+                <button type="button" class="ghost disclosure ai-dev-toggle" id="ai-dev-toggle" aria-expanded="false" aria-controls="ai-dev-body">Show</button>
               </div>
-              <div class="ai-dev-list" id="ai-dev-list"></div>
+              <div class="ai-dev-body" id="ai-dev-body">
+                <div class="panel-body ai-dev-filter">
+                  <label class="field compact grow"><span class="sr-only">Filter devices</span><input id="ai-dev-filter" type="search" placeholder="Filter by reference, name, IP, vendor…" autocomplete="off" /></label>
+                  <p class="muted small">Names here stay on this computer: the AI only sees the references. Click a device for its details; ↵ mentions it in your reply.</p>
+                </div>
+                <div class="ai-dev-list" id="ai-dev-list"></div>
+              </div>
             </div>
 
-            <div class="panel ai-p-consent">
+            <div class="panel ai-p-consent" id="ai-consent-panel">
               <div class="panel-head"><h3>Before you share</h3></div>
               <div class="panel-body ai-stack" id="ai-consent">
                 <p class="banner is-warn">What you share describes your network: its devices, open services, software versions, and possible weak spots. AI services may keep it, log it, or train on it. The Claude and Codex CLIs send it to Anthropic or OpenAI under your account; a local model server keeps it on this computer. Network Sweeper sends nothing on its own. Sharing is at your own risk.</p>
@@ -271,7 +278,7 @@
               </div>
             </div>
 
-            <div class="panel ai-p-backend">
+            <div class="panel ai-p-backend" id="ai-backend-panel">
               <div class="panel-head"><h3>AI to ask</h3></div>
               <div class="panel-body ai-stack">
                 <fieldset class="ai-backends" id="ai-backends"><legend class="sr-only">AI to ask</legend><p class="muted small">Checking what is installed…</p></fieldset>
@@ -283,7 +290,7 @@
               </div>
             </div>
 
-            <div class="panel ai-p-prompt">
+            <div class="panel ai-p-prompt" id="ai-prompt-panel">
               <div class="panel-head"><h3>Prompt</h3><span id="ai-stats" class="muted small"></span></div>
               <div class="panel-body ai-stack">
                 <details class="ai-prompt-details" id="ai-prompt-details">
@@ -324,35 +331,25 @@
       </section>
 
       <section id="tab-settings" class="tab" role="tabpanel" hidden aria-labelledby="tabbtn-settings">
-        <div class="panel">
+        <div class="settings-col">
+        <section class="panel" id="permissions" aria-labelledby="permissions-title">
           <div class="panel-head">
-            <h3>Settings</h3>
+            <h3 id="permissions-title">Network permissions</h3>
           </div>
           <div class="panel-body settings-stack">
             <label class="check setting-row">
               <input type="checkbox" id="custom-optin" />
               <span>
                 <strong>Allow custom ranges outside detected local subnets</strong>
-                <small>Server-enforced. Without this, non-local ranges are rejected.</small>
+                <small>Server-enforced. Without this, non-local ranges are rejected. Only scan networks you own or are authorized to assess.</small>
               </span>
             </label>
-            <label class="check setting-row">
-              <input type="checkbox" id="updates-optin" />
-              <span>
-                <strong>Allow update checks</strong>
-                <small>Opt-in. Contacts GitHub Releases only when you check; scanning still works offline.</small>
-              </span>
-            </label>
-            <div class="settings-actions">
-              <button id="check-update" class="ghost" type="button">Check for updates now</button>
-            </div>
-            <div id="update-result" class="update-result" hidden></div>
           </div>
-        </div>
+        </section>
 
-        <div class="panel" id="storage">
+        <section class="panel" id="storage" aria-labelledby="storage-title">
           <div class="panel-head">
-            <h3>History and saved data</h3>
+            <h3 id="storage-title">History and saved data</h3>
           </div>
           <div class="panel-body settings-stack">
             <p id="storage-status" class="help"></p>
@@ -372,11 +369,45 @@
             <p id="data-locked" class="muted small" hidden>Deleting is unavailable while a scan runs.</p>
             <p id="data-result" class="status-line" aria-live="polite"></p>
           </div>
-        </div>
+        </section>
 
-        <div class="panel" id="capabilities">
+        <section class="panel" id="ai-settings" aria-labelledby="ai-settings-title">
           <div class="panel-head">
-            <h3>Platform capabilities</h3>
+            <h3 id="ai-settings-title">AI analysis</h3>
+          </div>
+          <div class="panel-body settings-stack">
+            <p class="help">The Analyze tab can send a scan to an AI on this computer once you acknowledge the risk. Network Sweeper sends nothing on its own and has no API keys.</p>
+            <ul class="plain ai-found" id="ai-found"><li class="muted small">Checking what is installed…</li></ul>
+            <div class="setting-inline">
+              <label class="field compact grow"><span>Local model server</span><input id="set-local-url" type="text" spellcheck="false" autocomplete="off" placeholder="http://127.0.0.1:8080" /></label>
+              <button id="set-local-check" class="ghost" type="button">Check</button>
+            </div>
+            <p class="help">An OpenAI-compatible server on this computer, such as llama.cpp or Ollama. Only loopback addresses are accepted.</p>
+          </div>
+        </section>
+
+        <section class="panel" id="updates" aria-labelledby="updates-title">
+          <div class="panel-head">
+            <h3 id="updates-title">Updates</h3>
+          </div>
+          <div class="panel-body settings-stack">
+            <label class="check setting-row">
+              <input type="checkbox" id="updates-optin" />
+              <span>
+                <strong>Allow update checks</strong>
+                <small>Opt-in. Contacts GitHub Releases only when you check; scanning still works offline.</small>
+              </span>
+            </label>
+            <div class="settings-actions">
+              <button id="check-update" class="ghost" type="button">Check for updates now</button>
+            </div>
+            <div id="update-result" class="update-result" hidden></div>
+          </div>
+        </section>
+
+        <section class="panel" id="capabilities" aria-labelledby="capabilities-title">
+          <div class="panel-head">
+            <h3 id="capabilities-title">Platform capabilities</h3>
           </div>
           <div id="platform" class="panel-body"></div>
           <details class="how-scanning">
@@ -386,6 +417,7 @@
               <div id="port-lists"></div>
             </div>
           </details>
+        </section>
         </div>
       </section>
     </main>
