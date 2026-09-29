@@ -1571,7 +1571,9 @@
     bound: false,
     counts: null, // prompt stats; null while the prompt is loading
     seq: 0,
-    scanKey: "", // profile and scan the prompt was built from
+    scanKey: "", // profile and scan the prompt was built from; "" to rebuild
+    promptScan: null, // that scan, which the heading describes during a conversation
+    backendSeq: 0,
     backends: [],
     backendsLoaded: false,
     backend: "",
@@ -1610,14 +1612,16 @@
     const btn = $("tabbtn-analyze");
     btn.hidden = !latest && !aiTalking();
     if (btn.hidden && !$("tab-analyze").hidden) activateTab("devices", false);
-    if (latest) $("ai-title").textContent = `Analyze with AI · scan of ${fmtTime(latest.finishedAt)}`;
+    // A conversation stays about the scan it started from until Start over.
+    const scan = (aiTalking() && ai.promptScan) || latest;
+    if (scan) $("ai-title").textContent = `Analyze with AI · scan of ${fmtTime(scan.finishedAt)}`;
     // Old or partial data gives old or partial advice: say so, and offer a rescan.
     const notes = [];
-    if (latest && Date.now() - new Date(latest.finishedAt).getTime() > STALE_MS) {
-      notes.push(`This scan is from ${ago(latest.finishedAt)}, so devices and services may have changed since.`);
+    if (scan && Date.now() - new Date(scan.finishedAt).getTime() > STALE_MS) {
+      notes.push(`This scan is from ${ago(scan.finishedAt)}, so devices and services may have changed since.`);
     }
-    if (latest?.partial) {
-      const how = latest.state === "timed_out" ? "hit the time limit" : latest.state === "failed" ? "failed" : "was stopped early";
+    if (scan?.partial) {
+      const how = scan.state === "timed_out" ? "hit the time limit" : scan.state === "failed" ? "failed" : "was stopped early";
       notes.push(`It ${how}, so some devices may not have been checked.`);
     }
     $("ai-scan-note").hidden = !notes.length;
@@ -1636,7 +1640,13 @@
   function aiRefreshPrompt() {
     const key = aiScanKey();
     if (!key || key === ai.scanKey || aiTalking()) return;
-    ai.scanKey = key;
+    aiUsePrompt();
+  }
+
+  // aiUsePrompt builds the prompt from the latest scan, with the current masks.
+  function aiUsePrompt() {
+    ai.scanKey = aiScanKey();
+    ai.promptScan = state.inv?.latestScan || null;
     aiLoadPrompt();
   }
 
@@ -1654,6 +1664,7 @@
       $("ai-status").textContent = "";
     } catch (e) {
       if (mine !== ai.seq) return;
+      ai.scanKey = ""; // try again on the next refresh
       $("ai-prompt").value = "";
       $("ai-status").textContent = "Could not build the prompt: " + e.message;
     }
@@ -1661,11 +1672,16 @@
   }
 
   async function aiLoadBackends() {
+    // Only the newest check counts, so an older one cannot report on a
+    // server address that has since changed.
+    const mine = ++ai.backendSeq;
     ai.backendsLoaded = true;
     try {
       const res = await api("/api/assistant?localUrl=" + encodeURIComponent($("ai-local-url").value.trim()));
+      if (mine !== ai.backendSeq) return;
       ai.backends = res.backends || [];
     } catch (e) {
+      if (mine !== ai.backendSeq) return;
       $("ai-backends").innerHTML = `<legend class="sr-only">AI to ask</legend><p class="muted small">${escapeHtml("Could not check for AI tools: " + e.message)}</p>`;
       ai.backendsLoaded = false;
       return;
@@ -1754,9 +1770,16 @@
     $("ai-reset").hidden = !replying || busy;
     $("ai-with").textContent = talking && b ? "· " + b.label : "";
 
-    const newer = talking && ai.scanKey && aiScanKey() && aiScanKey() !== ai.scanKey;
-    $("ai-note").hidden = !newer;
-    $("ai-note").textContent = newer ? "A newer scan is available. Start over to analyze it." : "";
+    const key = aiScanKey();
+    const moved = talking && ai.scanKey && key && key !== ai.scanKey;
+    $("ai-note").hidden = !moved;
+    if (moved) {
+      const latest = state.inv.latestScan;
+      $("ai-note").textContent =
+        key.split("|")[0] === ai.scanKey.split("|")[0]
+          ? `A newer scan (${fmtTime(latest.finishedAt)}) is available. This conversation is about the earlier one; Start over to analyze the new scan.`
+          : "Another network is selected. This conversation is about the earlier one; Start over to analyze the selected network.";
+    }
     if (!talking) aiRenderThread();
   }
 
@@ -1911,10 +1934,7 @@
       aiSync();
       $("ai-mask-macs").focus();
     });
-    const remask = () => {
-      ai.scanKey = aiScanKey();
-      aiLoadPrompt();
-    };
+    const remask = () => aiUsePrompt();
     $("ai-mask-macs").addEventListener("change", remask);
     $("ai-mask-names").addEventListener("change", remask);
     $("ai-prompt").addEventListener("input", aiSync);
@@ -1954,8 +1974,7 @@
       ai.history = [];
       ai.prompt = "";
       $("ai-chat-status").textContent = "";
-      aiRefreshPrompt();
-      aiSync();
+      syncAnalyzeTab(); // heading, warning and prompt move to the latest scan
     });
     $("ai-copy-chat").addEventListener("click", async () => {
       const who = aiBackend()?.label || "AI";
