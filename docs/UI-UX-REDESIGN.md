@@ -1,6 +1,6 @@
 # Network Sweeper: muted desktop console redesign
 
-Status: stage 1 (Shell) has merged, and stage 2 (Devices) is in review. Stages 3 and 4 have not started.
+Status: stages 1 (Shell) and 2 (Devices) have merged, and stage 3 (Inspector) is in review. Stage 4 has not started.
 
 This plan delivers the device workspace described in Release 1 of the roadmap (`docs/ROADMAP.md` on the `planning/network-sweeper-roadmap` branch). Once the last stage below has merged, fold what remains useful here into a UI section of `docs/ARCHITECTURE.md` and delete this file.
 
@@ -63,9 +63,9 @@ Stage 3 carries the most behaviour change and gets its own manual verification p
 ## Device inspection and other views
 
 - At window widths **1200px and above**, open a side inspector beside the current view. It starts at 400px, has a drag handle, is clamped between 360px and half the window, and remembers its width in `localStorage`. At narrower widths, use a full-width modal inspector with a fixed heading and close control.
-- Build the modal inspector on a native `<dialog>` opened with `showModal()`. That provides the focus trap, the inert background, and Escape handling, and its `cancel` event is where the unsaved-edit guard intercepts Escape. Remove the hand-rolled Tab trap in `web/app.js` once nothing else uses the old modal.
+- Build the modal inspector on a native `<dialog>` opened with `showModal()`. That provides the focus trap, the inert background, and Escape handling, and its `cancel` event is where the unsaved-edit guard intercepts Escape. Remove the hand-rolled Tab trap in `web/app.js` once nothing else uses the old modal. (As built, the same `<dialog>` is shown with `show()` for the side inspector. Escape is handled on `keydown`, because a browser may skip a `cancel` listener on a repeated Escape; `cancel` still covers other close requests. From 1200px the app bar stays pinned, so the side inspector can fill the window height below it.)
 - Put the editable device name in the inspector header, next to the address and rescan control, so renaming never requires tabbing through findings. Order the body as overview/identity, services, findings, tags/notes, then observation history.
-- Preserve unsaved annotations during refresh and resizing, including the re-render that follows a finished scan and a reconnect. Keep one draft per device in memory so switching between devices does not lose or prompt for edits. Before closing the inspector or changing profiles with edits pending, offer Save, Discard, or Cancel. Failed saves retain the draft.
+- Preserve unsaved annotations during refresh and resizing, including the re-render that follows a finished scan and a reconnect. Keep one draft per device in memory so switching between devices does not lose or prompt for edits. Before closing the inspector or changing profiles with edits pending, offer Save, Discard, or Cancel. Failed saves retain the draft. (As built, a device with a draft shows an Unsaved badge in the list, and unsent acknowledgement notes survive re-renders too.)
 - Guard against stale detail requests when users select devices quickly: number each request and ignore responses that are not the latest. Show inline errors with Retry instead of silently failing.
 - Implement appropriate focus behavior: the wide inspector allows access to the list; the narrow inspector traps focus and makes the background inert. Escape closes, subject to the unsaved-edit guard, and focus returns to the originating control.
 - Rescan from the inspector keeps the inspector open on the same device and switches to Devices only when the inspector is modal. When the rescan finishes, the inspector refreshes in place, subject to the draft rule above.

@@ -1641,7 +1641,7 @@
    "basis": "mac",
    "mac": "00:0c:29:4d:07:07",
    "name": "Old PC in the garage",
-   "notes": "Kept for the lathe controller software. Do not update.",
+   "notes": "Kept for the lathe controller software. Do not update: the vendor's installer only runs on this build.\n\nTelnet and FTP are how the lathe pulls its programs. Both are blocked at the router for everything outside the garage VLAN.\n\nIf it dies: the disk image is on the NAS under backups/garage-pc, and the licence dongle is in the drawer under the bench.",
    "tags": [
     "garage",
     "legacy"
@@ -3698,7 +3698,7 @@
    "basis": "mac",
    "mac": "dc:a6:32:5e:50:50",
    "name": "Test bench Pi",
-   "notes": "Draft-edit check: change this device's name, tags or notes without saving, let a scan finish, and confirm the edits are still there.",
+   "notes": "Draft checks: edit the name, tags or notes without saving, then let a scan finish, resize across 1200px, and switch to another device and back. The edits stay until Save or Discard; closing with edits pending asks first.",
    "tags": [
     "lab",
     "test"

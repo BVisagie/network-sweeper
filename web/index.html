@@ -75,6 +75,7 @@
       </div>
     </section>
 
+    <div class="workspace" id="workspace">
     <main id="main" hidden>
       <section id="tab-devices" class="tab active" role="tabpanel" aria-labelledby="tabbtn-devices">
         <section class="panel scanbar" id="scanbar" aria-labelledby="scanbar-title">
@@ -388,21 +389,52 @@
         </div>
       </section>
     </main>
-  </div>
-  <div id="float-tip" class="float-tip" role="tooltip" hidden></div>
-  <div id="modal" class="modal" hidden>
-    <div class="modal-backdrop" data-close-modal></div>
-    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-      <div class="modal-head">
-        <div>
-          <h2 id="modal-title"></h2>
-          <p id="modal-sub" class="modal-sub"></p>
+
+    <dialog id="inspector" class="inspector" aria-labelledby="insp-title" tabindex="-1" autofocus>
+      <div class="insp-resize" id="insp-resize" role="separator" aria-orientation="vertical" aria-label="Resize device details" aria-valuemin="360" tabindex="0"></div>
+      <header class="insp-head">
+        <h2 id="insp-title" class="sr-only">Device details</h2>
+        <div class="insp-head-row">
+          <input id="insp-name" class="insp-name" type="text" maxlength="80" autocomplete="off" spellcheck="false" aria-label="Device name" />
+          <button type="button" class="ghost insp-close" id="insp-close" aria-label="Close device details">Close</button>
         </div>
-        <button type="button" class="ghost modal-close" data-close-modal aria-label="Close">Close</button>
+        <p id="insp-sub" class="insp-sub"></p>
+        <div class="insp-bar">
+          <button type="button" class="primary" id="insp-save" disabled>Save</button>
+          <button type="button" class="ghost" id="insp-rescan">Rescan</button>
+          <span id="insp-dirty" class="insp-dirty" hidden>Unsaved changes</span>
+          <span id="insp-status" class="status-line" aria-live="polite"></span>
+        </div>
+      </header>
+      <div id="insp-body" class="insp-body">
+        <div id="insp-state" class="insp-state"></div>
+        <section id="insp-overview" class="detail-section insp-live"></section>
+        <section id="insp-services" class="detail-section insp-live"></section>
+        <section id="insp-findings" class="detail-section insp-live"></section>
+        <section class="detail-section" aria-labelledby="insp-notes-title">
+          <h3 id="insp-notes-title">Tags and notes</h3>
+          <div class="annotate">
+            <label class="field"><span>Tags <small class="muted">(comma separated)</small></span><input id="insp-tags" type="text" maxlength="400" autocomplete="off" /></label>
+            <label class="field"><span>Notes</span><textarea id="insp-notes" rows="4" maxlength="4000"></textarea></label>
+          </div>
+        </section>
+        <section id="insp-history" class="detail-section insp-live"></section>
       </div>
-      <div id="modal-body" class="modal-body"></div>
+    </dialog>
     </div>
   </div>
+  <div id="float-tip" class="float-tip" role="tooltip" hidden></div>
+  <dialog id="guard" class="guard" aria-labelledby="guard-title" aria-describedby="guard-text">
+    <form method="dialog">
+      <h2 id="guard-title">Unsaved changes</h2>
+      <p id="guard-text"></p>
+      <div class="form-actions">
+        <button value="save" class="primary" autofocus>Save</button>
+        <button value="discard" class="ghost danger">Discard</button>
+        <button value="cancel" class="ghost">Cancel</button>
+      </div>
+    </form>
+  </dialog>
   <script>
     window.__NS_TOKEN__ = "__SESSION_TOKEN__";
     window.__NS_VERSION__ = "__APP_VERSION__";

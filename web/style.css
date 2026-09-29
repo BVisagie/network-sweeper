@@ -53,6 +53,12 @@
   --control-h: 2rem;
   --gutter: clamp(1rem, 2vw, 1.5rem);
   --measure: 65ch; /* about 70 characters of prose */
+  /* What stays pinned at the top while the page scrolls: the scan strip
+     while scanning, and from 1200px the app bar too. Sticky panels start
+     below it. */
+  --appbar-h: 2.8125rem;
+  --strip-h: 2.5rem;
+  --sticky-top: 0px;
   --shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
 }
 
@@ -205,6 +211,22 @@ button.appbar-status:hover {
   .tabs { order: 0; flex: 0 1 auto; }
 }
 
+body.is-scanning { --sticky-top: var(--strip-h); }
+
+@media (min-width: 1200px) {
+  :root { --sticky-top: var(--appbar-h); }
+  body.is-scanning { --sticky-top: calc(var(--appbar-h) + var(--strip-h)); }
+
+  .appbar {
+    position: sticky;
+    top: 0;
+    z-index: 31;
+    min-height: var(--appbar-h);
+  }
+
+  .scan-strip { top: var(--appbar-h); }
+}
+
 .tabs button {
   flex: none;
   min-height: 2.25rem;
@@ -262,6 +284,9 @@ button.appbar-status:hover {
 .consent .panel-body .consent-lead { color: var(--fg); }
 .consent-subnets { margin: 0.9rem 0 0.25rem; }
 .consent-actions { margin-top: 1rem; }
+
+.panel,
+.ai-conversation { scroll-margin-top: calc(var(--sticky-top) + 0.75rem); }
 
 .panel {
   border: 1px solid var(--line);
@@ -821,6 +846,7 @@ button.disclosure[aria-expanded="true"]::after { transform: translateY(0.1rem) r
   display: flex;
   align-items: center;
   gap: 0.6rem;
+  min-height: var(--strip-h);
   padding: 0.2rem var(--gutter);
   border-bottom: 1px solid var(--line);
   background: var(--surface-2);
@@ -1731,71 +1757,174 @@ button.device-link.name-empty { color: var(--faint); font-weight: 500; }
   overflow-wrap: anywhere;
 }
 
-/* ---------- device dialog ---------- */
+/* ---------- device inspector ---------- */
 
-body.modal-open { overflow: hidden; }
-
-.modal {
-  position: fixed;
-  inset: 0;
-  z-index: 40;
+/* Beside the view from 1200px: a docked, resizable panel. Narrower: a
+   full-window modal sheet. Both keep the header fixed and scroll the body. */
+.workspace {
   display: grid;
-  place-items: center;
-  padding: 1.25rem;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
 }
 
-.modal-backdrop {
-  position: absolute;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-}
+.workspace.has-side { grid-template-columns: minmax(0, 1fr) var(--insp-w, 400px); }
 
-.modal-dialog {
-  position: relative;
-  z-index: 1;
-  width: min(52rem, 100%);
-  max-height: min(90vh, 60rem);
-  display: flex;
-  flex-direction: column;
+.inspector {
+  padding: 0;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
   background: var(--surface);
-  box-shadow: var(--shadow);
+  color: var(--fg);
 }
 
-.modal-head {
+.inspector[open] {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.85rem 1.1rem;
+  flex-direction: column;
+}
+
+.inspector:focus { outline: none; }
+
+.inspector:not(:modal) {
+  position: sticky;
+  top: calc(var(--sticky-top) + 0.75rem);
+  width: auto;
+  max-width: none;
+  height: calc(100vh - var(--sticky-top) - 1.5rem);
+  margin: 0;
+}
+
+.inspector:modal {
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.inspector::backdrop,
+.guard::backdrop { background: rgba(0, 0, 0, 0.6); }
+
+.insp-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -0.5rem;
+  z-index: 2;
+  width: 0.75rem;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.insp-resize::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: calc(50% - 1.5px);
+  width: 3px;
+  height: 2.5rem;
+  border-radius: 2px;
+  background: var(--line-strong);
+  transform: translateY(-50%);
+}
+
+.insp-resize:hover::after,
+.insp-resize:focus-visible::after,
+.is-resizing .insp-resize::after { background: var(--accent); }
+
+.insp-resize:focus-visible { outline-offset: -2px; }
+.inspector:modal .insp-resize { display: none; }
+body.is-resizing { cursor: col-resize; user-select: none; }
+
+.insp-head {
+  flex: none;
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.75rem 1rem;
   border-bottom: 1px solid var(--line);
 }
 
-.modal-head > div { min-width: 0; }
+.insp-head-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
 
-.modal-head h2 {
-  margin: 0;
+/* The name reads as the heading, and is edited in place. */
+input.insp-name {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--control-h);
+  padding: 0 0.4rem;
+  margin-left: -0.4rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
   font-size: var(--fs-lg);
   font-weight: 600;
-  overflow-wrap: anywhere;
 }
 
-.modal-sub {
-  margin: 0.25rem 0 0;
+input.insp-name:hover { border-color: var(--line); }
+input.insp-name:focus { border-color: var(--accent); background: var(--surface-2); }
+input.insp-name:focus-visible { outline-offset: 0; }
+.insp-close { flex: none; }
+
+.insp-sub {
+  margin: 0;
+  overflow: hidden;
   color: var(--muted);
-  font-family: var(--mono);
   font-size: var(--fs-sm);
-  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.modal-sub:empty { display: none; }
-.modal-close { flex-shrink: 0; }
+.insp-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+}
 
-.modal-body {
-  padding: 0.85rem 1.1rem 1.1rem;
+.insp-dirty { color: var(--warn-fg); font-size: var(--fs-sm); }
+
+.insp-body {
+  flex: 1;
+  min-height: 0;
+  padding: 0.85rem 1rem 1.25rem;
   overflow: auto;
+  container: inspector / inline-size;
 }
+
+.insp-body .context-label { margin-top: 0.85rem; }
+
+@container inspector (width < 22rem) {
+  .kv { grid-template-columns: 1fr; }
+  .kv dt { margin-top: 0.3rem; }
+}
+
+.insp-state:empty { display: none; }
+.insp-state + .detail-section[hidden] + * { margin-top: 0; }
+.insp-error { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.insp-error button { flex: none; }
+
+.tag-pill.draft { color: var(--warn-fg); border-color: var(--warn-line); }
+
+.guard {
+  width: min(28rem, calc(100vw - 2rem));
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg);
+  box-shadow: var(--shadow);
+}
+
+.guard h2 { margin: 0 0 0.5rem; font-size: var(--fs-lg); font-weight: 600; }
+.guard p { margin: 0 0 1rem; color: var(--muted); }
 
 .detail-section + .detail-section {
   margin-top: 1rem;
@@ -1864,8 +1993,8 @@ button.ai-cta.is-fresh { animation: ai-glow 1.4s ease-out 2; }
   display: flex;
   flex-direction: column;
   position: sticky;
-  top: 1rem;
-  max-height: calc(100vh - 2rem);
+  top: calc(var(--sticky-top) + 1rem);
+  max-height: calc(100vh - var(--sticky-top) - 2rem);
   margin-bottom: 0;
 }
 
@@ -2012,14 +2141,14 @@ textarea.ai-prompt:disabled { opacity: 0.45; cursor: not-allowed; resize: none; 
   display: flex;
   flex-direction: column;
   position: sticky;
-  top: 1rem;
+  top: calc(var(--sticky-top) + 1rem);
   min-height: 22rem;
   margin-bottom: 0;
 }
 
 /* In a conversation the panel fits its messages, so the reply box sits right
    under the last one; past the screen height the messages scroll instead. */
-.ai-conversation.is-talking { max-height: calc(100vh - 2rem); min-height: 0; }
+.ai-conversation.is-talking { max-height: calc(100vh - var(--sticky-top) - 2rem); min-height: 0; }
 .ai-conversation .panel-head { flex-wrap: wrap; }
 .ai-conversation .panel-head h3 { gap: 0.4rem; flex-wrap: wrap; }
 #ai-with { white-space: nowrap; font-weight: 400; }
@@ -2126,9 +2255,6 @@ textarea.ai-prompt:disabled { opacity: 0.45; cursor: not-allowed; resize: none; 
 @media (max-width: 900px) {
   .compare-pick select, .setting-inline .field { min-width: 0; width: 100%; }
   .compare-pick .field, .setting-inline .field { flex: 1 1 100%; }
-  .kv { grid-template-columns: 1fr; }
-  .kv dt { margin-top: 0.3rem; }
-  .modal { padding: 0.5rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
