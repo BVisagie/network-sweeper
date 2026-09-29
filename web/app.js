@@ -575,6 +575,7 @@
   function syncScanButton() {
     const running = !!state.polling;
     $("scan-btn").disabled = running || !(state.preview && state.preview.ok);
+    $("scan-btn").textContent = running ? "Scanning…" : "Scan";
     $("analyze-btn").hidden = running || !state.inv?.latestScan;
     syncAnalyzeTab();
   }
@@ -587,6 +588,13 @@
   function setScanning(running) {
     $("stop-btn").hidden = !running;
     $("progress").hidden = !running;
+    // A scan's ranges and options are fixed once it starts, and deleting
+    // history under it would lose it: lock those controls until it ends.
+    // (Disabling the fieldset keeps each too-large subnet's own disabled flag.)
+    document.querySelector("fieldset.scope").disabled = running;
+    ["deep", "custom-optin", "delete-history", "delete-all"].forEach((id) => ($(id).disabled = running));
+    $("scan-locked").hidden = !running;
+    $("data-locked").hidden = !running;
     if (running) {
       state.lastPct = 0;
       $("progress-bar").style.width = "0%";
@@ -1039,7 +1047,7 @@
           <label class="field"><span>Notes</span><textarea id="a-notes" rows="3" maxlength="4000">${escapeHtml(d.notes || "")}</textarea></label>
           <div class="form-actions">
             <button type="submit" class="primary">Save notes</button>
-            <button type="button" class="ghost" id="rescan-device" ${devIP(d) ? "" : "disabled"}>Rescan this device</button>
+            <button type="button" class="ghost" id="rescan-device" ${devIP(d) && !state.polling ? "" : "disabled"}${state.polling ? ` title="A scan is running."` : ""}>Rescan this device</button>
             <span id="annotate-status" class="status-line" aria-live="polite"></span>
           </div>
         </form>

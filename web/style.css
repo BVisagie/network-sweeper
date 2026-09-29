@@ -1501,6 +1501,7 @@ body.modal-open { overflow: hidden; }
 }
 
 .scope-item.too-large { opacity: 0.8; }
+.scope:disabled, .deep-check:has(input:disabled), .setting-row:has(input:disabled) { opacity: 0.55; cursor: not-allowed; }
 .scope-item.too-large small { color: var(--warn-fg); }
 .scope-extra { margin-top: 0.6rem; max-width: 34rem; }
 

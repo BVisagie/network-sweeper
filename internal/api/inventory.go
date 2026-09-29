@@ -208,6 +208,14 @@ func (s *Server) handleDeleteHistory(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
+	// A running scan would save itself into the history being deleted.
+	s.mu.Lock()
+	running := s.scanRunning
+	s.mu.Unlock()
+	if running {
+		http.Error(w, "A scan is running. Stop it, or wait for it to finish, before deleting history.", http.StatusConflict)
+		return
+	}
 	var err error
 	switch req.What {
 	case "scans":
