@@ -2,7 +2,7 @@
 
 Local LAN inventory in one Go binary: discover devices on networks attached to your machine, keep names and notes for them, see what changed since the last scan, and review exposure findings that say what evidence backs them. Not a remote pentest suite or exploit framework.
 
-After a scan, the **Analyze** tab builds a prompt that works with any AI model. It holds the scan's data, with MAC addresses and names masked by default, and asks the model for hardening advice. You can copy it, or have the conversation right in the tab with an AI on this computer: the Claude or Codex CLI (run with every tool off, and never as root) or a local model server such as llama.cpp or Ollama. Network Sweeper makes no AI calls itself. Sharing your network's details with an AI service is at your own risk.
+After a scan, the **Analyze** tab builds a prompt that works with any AI model. It holds the scan's data, with MAC addresses and names masked by default, and asks the model for hardening advice. You can copy it, or have the conversation right in the tab with an AI on this computer, with each masked `device-N` shown next to your own name for it (on your screen only): the Claude or Codex CLI (run with every tool off, and never as root) or a local model server such as llama.cpp or Ollama. Network Sweeper makes no AI calls itself. Sharing your network's details with an AI service is at your own risk.
 
 **Only scan networks you own or are authorized to assess.** The UI binds to `127.0.0.1` only.
 

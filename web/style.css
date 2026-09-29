@@ -1700,6 +1700,108 @@ body.modal-open { overflow: hidden; }
 .analyze-head .help { margin: 0; max-width: 60rem; }
 .ai-scan-note { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin: 0.8rem 0 0; }
 .ai-scan-note span { flex: 1 1 20rem; }
+.ai-setup-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin: 0 0 1rem;
+  padding: 0.6rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(18, 28, 24, 0.72);
+  font-size: 0.88rem;
+}
+
+/* Devices in this analysis: the key from device-N to the owner's devices. */
+.ai-p-devices {
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 1rem;
+  max-height: calc(100vh - 2rem);
+  margin-bottom: 0;
+}
+.ai-dev-filter { display: grid; gap: 0.5rem; padding-bottom: 0.6rem; }
+.ai-dev-filter p { margin: 0; }
+.ai-dev-filter input {
+  width: 100%;
+  min-height: 2.2rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-elevated);
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.85rem;
+}
+.ai-dev-list { overflow-y: auto; padding: 0 0.6rem 0.8rem; }
+.ai-dev-group {
+  margin: 0.7rem 0.4rem 0.3rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.ai-dev { display: flex; align-items: stretch; gap: 0.25rem; border-radius: var(--radius-sm); }
+.ai-dev.is-hot { background: rgba(62, 207, 142, 0.1); box-shadow: inset 0 0 0 1px var(--accent-dim); }
+.ai-dev-main {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 5.2rem minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.5rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg);
+  text-align: left;
+  font-size: 0.85rem;
+}
+.ai-dev-main:hover { background: var(--bg-soft); }
+.ai-dev-ref { color: var(--accent); font-size: 0.78rem; }
+.ai-dev-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-dev-ip { color: var(--muted); font-size: 0.75rem; }
+.ai-dev .sev { font-size: 0.7rem; }
+.ai-mention {
+  flex: none;
+  min-height: 0;
+  width: 2rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  padding: 0;
+}
+.ai-mention:hover { color: var(--accent); border-color: var(--line); }
+.ai-dev-none { padding: 0.5rem; }
+
+/* device-N chips in the conversation. */
+.ai-ref {
+  display: inline;
+  min-height: 0;
+  padding: 0 0.4rem;
+  font-weight: inherit;
+  border: 1px solid rgba(62, 207, 142, 0.35);
+  border-radius: 999px;
+  background: rgba(62, 207, 142, 0.08);
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 0.9em;
+  line-height: inherit;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.ai-ref .ai-ref-name { color: var(--fg); }
+.ai-ref:hover, .ai-ref.is-hot { background: rgba(62, 207, 142, 0.2); border-color: var(--accent); }
+.ai-ref-mac { border-bottom: 1px dotted var(--muted); cursor: help; }
 .ai-scan-note button { flex: none; }
 .analyze-grid {
   display: grid;
@@ -1853,6 +1955,9 @@ textarea.ai-prompt:disabled { opacity: 0.45; cursor: not-allowed; resize: none; 
   .analyze-side { display: contents; }
   .ai-p-consent { order: 1; }
   .ai-p-backend { order: 2; }
+  .ai-p-devices { order: 2; position: static; max-height: 45vh; margin-bottom: 1rem; }
+  .ai-dev-main { grid-template-columns: 4.6rem minmax(0, 1fr) auto; }
+  .ai-dev-ip { display: none; }
   .ai-conversation { order: 3; margin-bottom: 1rem; }
   .ai-p-prompt { order: 4; }
   .ai-conversation, .ai-conversation.is-talking { position: static; height: auto; min-height: 0; }

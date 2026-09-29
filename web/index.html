@@ -209,8 +209,21 @@
             <button type="button" class="ghost compact" id="ai-rescan">Scan again</button>
           </div>
         </div>
+        <div class="ai-setup-bar" id="ai-setup-bar" hidden>
+          <span><span class="ai-ok" aria-hidden="true">✓</span> <span id="ai-setup-text"></span></span>
+          <button type="button" class="text-link" id="ai-setup-toggle">View setup and prompt</button>
+        </div>
         <div class="analyze-grid">
           <div class="analyze-side">
+            <div class="panel ai-p-devices" id="ai-devices-panel" hidden>
+              <div class="panel-head"><h3>Devices in this analysis <span id="ai-dev-count" class="count-pill">0</span></h3></div>
+              <div class="panel-body ai-dev-filter">
+                <label class="field compact grow"><span class="sr-only">Filter devices</span><input id="ai-dev-filter" type="search" placeholder="Filter by reference, name, IP, vendor…" autocomplete="off" /></label>
+                <p class="muted small">Names here stay on this computer: the AI only sees the references. Click a device for its details; ↵ mentions it in your reply.</p>
+              </div>
+              <div class="ai-dev-list" id="ai-dev-list"></div>
+            </div>
+
             <div class="panel ai-p-consent">
               <div class="panel-head"><h3>Before you share</h3></div>
               <div class="panel-body ai-stack" id="ai-consent">

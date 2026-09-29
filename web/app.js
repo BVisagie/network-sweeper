@@ -1583,6 +1583,9 @@
     promptScan: null, // that scan, which the heading describes during a conversation
     backendSeq: 0,
     startError: "", // why the first send failed, shown where Start is
+    key: null, // which device and MAC each prompt reference stands for
+    snap: null, // those devices as they were when the conversation started
+    showSetup: false, // during a conversation: setup panels instead of devices
     backends: [],
     backendsLoaded: false,
     backend: "",
@@ -1670,6 +1673,7 @@
       if (mine !== ai.seq) return;
       $("ai-prompt").value = res.prompt;
       ai.counts = res.stats;
+      ai.key = res.key || null;
       $("ai-status").textContent = "";
     } catch (e) {
       if (mine !== ai.seq) return;
@@ -1772,6 +1776,15 @@
     $("ai-reply-wrap").hidden = !replying;
     $("ai-reply").disabled = !ok || busy;
     $("ai-hint").hidden = !replying || busy;
+    // During a conversation the left column lists the devices it is about;
+    // the locked setup folds into one line above, and can still be viewed.
+    const setupShown = !talking || ai.showSetup;
+    document.querySelectorAll(".ai-p-consent, .ai-p-backend, .ai-p-prompt").forEach((p) => (p.hidden = !setupShown));
+    $("ai-devices-panel").hidden = setupShown;
+    $("ai-setup-bar").hidden = !talking;
+    $("ai-setup-text").textContent = `${b?.label || "AI"} · MACs ${macs ? "masked" : "shown"} · names ${names ? "masked" : "shown"}`;
+    $("ai-setup-toggle").textContent = ai.showSetup ? "Back to devices" : "View setup and prompt";
+
     // Before the first reply, Start sits in the middle of the conversation;
     // the composer below appears once there is something to answer.
     $("ai-composer").hidden = !talking;
@@ -1824,12 +1837,13 @@
     for (const m of ai.history) {
       items.push(
         m.role === "assistant"
-          ? `<div class="ai-msg ai-msg-ai"><p class="ai-who">${escapeHtml(who)}</p><div class="ai-md">${renderMarkdown(m.text)}</div></div>`
-          : `<div class="ai-msg ai-msg-user"><p class="ai-who">You</p><div class="ai-plain">${escapeHtml(m.text)}</div></div>`
+          ? `<div class="ai-msg ai-msg-ai"><p class="ai-who">${escapeHtml(who)}</p><div class="ai-md">${aiLinkRefs(renderMarkdown(m.text))}</div></div>`
+          : `<div class="ai-msg ai-msg-user"><p class="ai-who">You</p><div class="ai-plain">${aiLinkRefs(escapeHtml(m.text))}</div></div>`
       );
     }
     if (ai.ctrl) items.push(`<div class="ai-msg ai-msg-ai"><p class="ai-who">${escapeHtml(who)}</p><p class="muted small ai-wait" id="ai-wait">Thinking…</p></div>`);
     thread.innerHTML = items.join("");
+    aiRenderDevices();
     // Show a new reply from its first line; otherwise keep the latest in view.
     const last = thread.lastElementChild;
     if (!ai.ctrl && last?.classList.contains("ai-msg-ai")) thread.scrollTop = last.offsetTop - thread.offsetTop - 12;
@@ -1901,9 +1915,107 @@
     return out.join("");
   }
 
+  // aiSnapshot records how each referenced device looks now, so the
+  // conversation keeps reading the same way even if a device is renamed.
+  function aiSnapshot() {
+    const byId = new Map(devices().map((d) => [d.id, d]));
+    const snap = { devices: new Map(), macs: new Map() };
+    for (const r of ai.key?.devices || []) {
+      const d = byId.get(r.deviceId);
+      const h = d?.last?.host || {};
+      const open = d ? openFindings(d) : [];
+      snap.devices.set(r.ref, {
+        ref: r.ref,
+        id: r.deviceId,
+        listed: r.listed,
+        // Your name, then hostname, then vendor: a service banner is a poor name.
+        name: d ? d.name || humanizeText(h.hostname || "") || h.vendor || devName(d) : "",
+        ip: d ? devIP(d) : "",
+        vendor: d?.last?.host?.vendor || "",
+        open: open.length,
+        worst: worstSeverity(open),
+      });
+    }
+    for (const m of ai.key?.macs || []) snap.macs.set(m.token, m.mac);
+    return snap;
+  }
+
+  const AI_REF = /\b(?:device|mac)-\d+\b/g;
+
+  // aiLinkRefs turns device-N and mac-N in rendered (already escaped) text
+  // into labelled chips. Unknown references stay as plain text.
+  function aiLinkRefs(html) {
+    if (!ai.snap) return html;
+    return html.replace(AI_REF, (ref) => {
+      const d = ai.snap.devices.get(ref);
+      if (d) {
+        const tip = [d.name && d.ip, d.vendor].filter(Boolean).join(" · ");
+        return `<button type="button" class="ai-ref" data-ref="${ref}" data-id="${escapeHtml(d.id)}"${tip ? ` title="${escapeHtml(tip)}"` : ""}>${ref}<span class="ai-ref-name"> · ${escapeHtml(d.name || d.ip || "unknown")}</span></button>`;
+      }
+      const mac = ai.snap.macs.get(ref);
+      return mac ? `<span class="ai-ref-mac" title="${escapeHtml(mac)}">${ref}</span>` : ref;
+    });
+  }
+
+  // aiMentioned lists the device references in the conversation, first
+  // mention first.
+  function aiMentioned() {
+    const seen = new Set();
+    for (const m of ai.history) for (const ref of m.text.match(AI_REF) || []) if (ai.snap?.devices.has(ref)) seen.add(ref);
+    return [...seen];
+  }
+
+  function aiRenderDevices() {
+    if (!ai.snap) return;
+    const q = $("ai-dev-filter").value.trim().toLowerCase();
+    const match = (d) => !q || [d.ref, d.name, d.ip, d.vendor].some((v) => v.toLowerCase().includes(q));
+    const mentioned = aiMentioned();
+    const all = [...ai.snap.devices.values()];
+    const row = (d) => `<div class="ai-dev" data-ref="${d.ref}">
+        <button type="button" class="ai-dev-main" data-id="${escapeHtml(d.id)}" title="Show this device's details">
+          <span class="ai-dev-ref mono">${d.ref}</span>
+          <span class="ai-dev-name"${d.name ? ` title="${escapeHtml(d.name)}"` : ""}>${d.name ? escapeHtml(d.name) : `<span class="muted">no name</span>`}${d.listed ? "" : ` <span class="tag-pill missing">not in this scan</span>`}</span>
+          <span class="ai-dev-ip mono">${escapeHtml(d.ip)}</span>
+          ${d.open ? `<span class="sev ${escapeHtml(d.worst)}">${d.open}</span>` : `<span></span>`}
+        </button>
+        <button type="button" class="ai-mention" data-ref="${d.ref}" title="Mention ${d.ref} in your reply" aria-label="Mention ${d.ref} in your reply">↵</button>
+      </div>`;
+    const first = mentioned.map((r) => ai.snap.devices.get(r)).filter(match);
+    const rest = all.filter((d) => d.listed && !mentioned.includes(d.ref) && match(d));
+    let html = "";
+    if (first.length) html += `<p class="ai-dev-group">Mentioned</p>` + first.map(row).join("");
+    if (rest.length) html += `<p class="ai-dev-group">${first.length ? "Other devices" : "All devices"}</p>` + rest.map(row).join("");
+    $("ai-dev-list").innerHTML = html || `<p class="muted small ai-dev-none">No device matches “${escapeHtml(q)}”.</p>`;
+    $("ai-dev-count").textContent = String(all.filter((d) => d.listed).length);
+  }
+
+  // Hovering a chip lights its device row, and hovering a row lights its chips.
+  function aiHot(ref, on) {
+    document.querySelectorAll(`#tab-analyze [data-ref="${ref}"]`).forEach((el) => el.classList.toggle("is-hot", on));
+    if (on) document.querySelector(`#ai-dev-list .ai-dev[data-ref="${ref}"]`)?.scrollIntoView({ block: "nearest" });
+  }
+
+  function aiMention(ref) {
+    const box = $("ai-reply");
+    const at = box.selectionStart ?? box.value.length;
+    const before = box.value.slice(0, at);
+    const text = (before && !/\s$/.test(before) ? " " : "") + ref + " ";
+    box.value = before + text + box.value.slice(box.selectionEnd ?? at);
+    const caret = before.length + text.length;
+    aiSync();
+    if (!box.disabled) {
+      box.focus();
+      box.setSelectionRange(caret, caret);
+    }
+  }
+
   async function aiSend() {
     const cs = $("ai-chat-status");
-    if (!ai.history.length) ai.prompt = $("ai-prompt").value;
+    if (!ai.history.length) {
+      ai.prompt = $("ai-prompt").value;
+      ai.snap = aiSnapshot();
+      ai.showSetup = false;
+    }
     else ai.history.push({ role: "user", text: $("ai-reply").value.trim() });
     const history = ai.history.slice();
     ai.ctrl = new AbortController();
@@ -2004,6 +2116,29 @@
     $("ai-send").addEventListener("click", aiSend);
     $("ai-thread").addEventListener("click", (e) => {
       if (e.target.closest("#ai-start")) aiSend();
+      const chip = e.target.closest(".ai-ref[data-id]");
+      if (chip) openDevice(chip.dataset.id);
+    });
+    $("ai-dev-list").addEventListener("click", (e) => {
+      const mention = e.target.closest(".ai-mention");
+      if (mention) return aiMention(mention.dataset.ref);
+      const main = e.target.closest(".ai-dev-main");
+      if (main) openDevice(main.dataset.id);
+    });
+    for (const id of ["ai-thread", "ai-dev-list"]) {
+      $(id).addEventListener("mouseover", (e) => {
+        const el = e.target.closest("[data-ref]");
+        if (el && !el.contains(e.relatedTarget)) aiHot(el.dataset.ref, true);
+      });
+      $(id).addEventListener("mouseout", (e) => {
+        const el = e.target.closest("[data-ref]");
+        if (el && !el.contains(e.relatedTarget)) aiHot(el.dataset.ref, false);
+      });
+    }
+    $("ai-dev-filter").addEventListener("input", aiRenderDevices);
+    $("ai-setup-toggle").addEventListener("click", () => {
+      ai.showSetup = !ai.showSetup;
+      aiSync();
     });
     $("ai-stop").addEventListener("click", () => ai.ctrl?.abort());
     $("ai-reset").addEventListener("click", () => {
@@ -2011,6 +2146,9 @@
       ai.history = [];
       ai.prompt = "";
       ai.startError = "";
+      ai.snap = null;
+      ai.showSetup = false;
+      $("ai-dev-filter").value = "";
       $("ai-chat-status").textContent = "";
       syncAnalyzeTab(); // heading, warning and prompt move to the latest scan
     });

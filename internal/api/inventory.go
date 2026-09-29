@@ -272,11 +272,13 @@ func (s *Server) handleAnalysisPrompt(w http.ResponseWriter, r *http.Request) {
 	if c, err := s.Store.Compare(profileID, latest.ID, ""); err == nil {
 		in.Changes = c
 	}
-	text, stats := analysis.Build(in, analysis.Options{
+	text, stats, key := analysis.Build(in, analysis.Options{
 		MaskMACs:  q.Get("maskMacs") != "0",
 		MaskNames: q.Get("maskNames") != "0",
 	})
-	writeJSON(w, map[string]any{"prompt": text, "stats": stats})
+	// The key stays in the page, so replies can name the owner's devices; it
+	// is not part of the prompt.
+	writeJSON(w, map[string]any{"prompt": text, "stats": stats, "key": key})
 }
 
 // handleAssistant reports which AI backends this computer can use.
