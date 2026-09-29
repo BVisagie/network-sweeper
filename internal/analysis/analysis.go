@@ -47,7 +47,8 @@ type Device struct {
 type Input struct {
 	AppVersion string
 	OS         string
-	Network    string // the profile's name
+	Now        time.Time // when the prompt is built; zero leaves it out
+	Network    string    // the profile's name
 	Scan       *inventory.Snapshot
 	Devices    []Device
 	Changes    *inventory.Comparison // nil with fewer than two scans
@@ -153,6 +154,7 @@ type changesOut struct {
 
 type doc struct {
 	GeneratedBy string      `json:"generatedBy"`
+	GeneratedAt string      `json:"generatedAt,omitempty"`
 	Network     string      `json:"network,omitempty"`
 	Masked      []string    `json:"masked,omitempty"`
 	Scan        scanOut     `json:"scan"`
@@ -165,6 +167,7 @@ func Build(in Input, opt Options) (string, Stats) {
 	m := newMasker(in, opt)
 	d := doc{
 		GeneratedBy: "Network Sweeper " + in.AppVersion,
+		GeneratedAt: day(in.Now, true),
 		Network:     m.name(in.Network),
 		Devices:     []deviceOut{},
 	}

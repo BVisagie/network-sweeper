@@ -1611,6 +1611,17 @@
     btn.hidden = !latest && !aiTalking();
     if (btn.hidden && !$("tab-analyze").hidden) activateTab("devices", false);
     if (latest) $("ai-title").textContent = `Analyze with AI · scan of ${fmtTime(latest.finishedAt)}`;
+    // Old or partial data gives old or partial advice: say so, and offer a rescan.
+    const notes = [];
+    if (latest && Date.now() - new Date(latest.finishedAt).getTime() > STALE_MS) {
+      notes.push(`This scan is from ${ago(latest.finishedAt)}, so devices and services may have changed since.`);
+    }
+    if (latest?.partial) {
+      const how = latest.state === "timed_out" ? "hit the time limit" : latest.state === "failed" ? "failed" : "was stopped early";
+      notes.push(`It ${how}, so some devices may not have been checked.`);
+    }
+    $("ai-scan-note").hidden = !notes.length;
+    $("ai-scan-note-text").textContent = notes.length ? notes.join(" ") + " Scan again for a current picture." : "";
     if (!$("tab-analyze").hidden) aiRefreshPrompt();
     aiSync();
   }
@@ -1960,6 +1971,11 @@
   }
 
   $("analyze-btn").addEventListener("click", () => activateTab("analyze"));
+  $("ai-rescan").addEventListener("click", () => {
+    activateTab("devices", false);
+    $("scan-btn").scrollIntoView({ block: "center" });
+    $("scan-btn").focus();
+  });
 
   // ---------- export ----------
 

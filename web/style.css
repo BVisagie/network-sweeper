@@ -1697,6 +1697,9 @@ body.modal-open { overflow: hidden; }
 .analyze-head { margin: 0 0 1rem; }
 .analyze-head h2 { margin: 0 0 0.3rem; font-size: 1.15rem; letter-spacing: -0.02em; }
 .analyze-head .help { margin: 0; max-width: 60rem; }
+.ai-scan-note { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin: 0.8rem 0 0; }
+.ai-scan-note span { flex: 1 1 20rem; }
+.ai-scan-note button { flex: none; }
 .analyze-grid {
   display: grid;
   grid-template-columns: minmax(18rem, 23rem) minmax(0, 1fr);

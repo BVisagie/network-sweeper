@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"runtime"
 	"sort"
+	"time"
 
 	"github.com/BVisagie/network-sweeper/internal/analysis"
 	"github.com/BVisagie/network-sweeper/internal/assistant"
@@ -243,6 +244,7 @@ func (s *Server) handleAnalysisPrompt(w http.ResponseWriter, r *http.Request) {
 	in := analysis.Input{
 		AppVersion: version.Version,
 		OS:         runtime.GOOS,
+		Now:        time.Now(),
 		Scan:       snap,
 	}
 	for _, p := range s.Store.Profiles() {
