@@ -638,6 +638,7 @@
     $("scan-btn").disabled = running || !(state.preview && state.preview.ok);
     $("scan-btn").textContent = running ? "Scanning…" : "Scan";
     $("analyze-btn").hidden = running || !state.inv?.latestScan;
+    syncInspectorBar();
     syncAnalyzeTab();
   }
 
@@ -648,6 +649,7 @@
 
   function setScanning(running) {
     $("scan-strip").hidden = !running;
+    document.body.classList.toggle("is-scanning", running);
     state.stopping = false;
     // A scan's ranges and options are fixed once it starts, and deleting
     // history under it would lose it: lock those controls until it ends.
@@ -686,7 +688,9 @@
     } catch (e) {
       status.textContent = "Could not start: " + e.message;
       setScanning(false);
+      return status.textContent;
     }
+    return "";
   }
 
   $("scan-btn").addEventListener("click", () => startScan(scanTargets()));
@@ -750,6 +754,8 @@
         failed: "Scan failed" + (run.error ? ": " + run.error : "."),
       };
       status.textContent = (ended[run.state] || "Scan finished.") + (run.finishedAt ? ` (${fmtTime(run.finishedAt)})` : "");
+      if (insp.rescanning && insp.rescanning === insp.id) $("insp-status").textContent = ended[run.state]?.replace(/^Scan/, "Rescan") || "Rescan finished.";
+      insp.rescanning = "";
       setScanNote(run.saveError ? "These results are shown but were not saved: " + run.saveError : "");
       if (run.state === "completed") setSetupOpen(false, false);
       state.justScanned = true; // point Changes at the newest two scans
@@ -757,7 +763,6 @@
       await refreshAll();
       state.justScanned = false;
       aiNudge();
-      if (state.currentDeviceId && !$("modal").hidden) openDevice(state.currentDeviceId, false);
     }, 700);
     syncScanButton();
   }
@@ -786,6 +791,7 @@
     renderFindings();
     renderSettingsData();
     syncScanButton();
+    refreshInspector();
   }
 
   // renderProfiles fills the network bar: the saved network being shown
@@ -818,7 +824,15 @@
     $("network-meta").title = $("network-meta").textContent;
   }
 
-  $("profile-select").addEventListener("change", () => refreshAll());
+  $("profile-select").addEventListener("change", async () => {
+    const want = $("profile-select").value;
+    if (drafts.size || dlg.open) {
+      $("profile-select").value = state.inv.profileId; // until the edits are settled
+      if (!(await requestCloseInspector("profile"))) return;
+      $("profile-select").value = want;
+    }
+    refreshAll();
+  });
 
   function devices() {
     return state.inv?.devices || [];
@@ -1035,6 +1049,10 @@
         if (h.isSelf) badges.push(`<span class="tag-pill self">This device</span>`);
         if (h.isGateway) badges.push(`<span class="tag-pill gw">Gateway</span>`);
         if (d.uncertain?.length) badges.push(`<span class="tag-pill guess" title="${escapeHtml(d.uncertain.join(" "))}">Identity uncertain</span>`);
+        if (drafts.has(d.id)) {
+          const title = drafts.get(d.id).unwritten ? "Its name, tags or notes are not saved to disk yet" : "Its name, tags or notes have unsaved changes";
+          badges.push(`<span class="tag-pill draft" title="${title}">Unsaved</span>`);
+        }
         const badgeHtml = badges.join("");
         const tags = (d.tags || []).map((t) => `<span class="tag-pill user">${escapeHtml(t)}</span>`).join("");
         const findings = (d.findings || []).length
@@ -1088,9 +1106,9 @@
     }
     if (e.target.closest("#clear-filters")) return clearFilters();
     const link = e.target.closest("[data-open]");
-    if (link) return openDevice(link.dataset.open);
+    if (link) return openDevice(link.dataset.open, { from: link });
     const tr = e.target.closest("tr[data-device]");
-    if (tr && !e.target.closest("button, a")) openDevice(tr.dataset.device);
+    if (tr && !e.target.closest("button, a")) openDevice(tr.dataset.device, { from: visibleIn(tr, ".device-link") });
   });
 
   $("hosts").addEventListener("keydown", (e) => {
@@ -1182,20 +1200,330 @@
   $("host-filter").addEventListener("input", () => renderDevices());
   for (const [id] of FILTERS) $(id).addEventListener("change", () => renderDevices());
 
-  // ---------- device detail ----------
+  // ---------- device inspector ----------
 
-  async function openDevice(id, focus = true) {
+  // The inspector shows one device: docked beside the current view on wide
+  // windows (a non-modal <dialog>), or as a full-window modal <dialog> on
+  // narrower ones. Unsaved names, tags and notes live in `drafts`, one per
+  // device, so refreshes, resizing and switching devices never lose them;
+  // only Discard does.
+  const INSP_WIDTH_KEY = "ns-inspector-width";
+  const INSP_MIN = 360;
+  const wideInspector = window.matchMedia("(min-width: 1200px)");
+  const dlg = $("inspector");
+  const insp = {
+    id: "", // the device shown
+    seq: 0, // latest detail request: older responses are ignored
+    device: null, // its last loaded details
+    origin: null, // the control that opened the inspector, for focus on close
+    originKey: "",
+    width: Number(remembered(INSP_WIDTH_KEY, "400")) || 400, // as chosen; applied clamped to the window
+    saving: false,
+    rescanning: "", // device whose rescan the inspector started
+  };
+  // device id -> { name, tags, notes, label, unwritten }. `unwritten` marks
+  // edits the server kept in memory but could not write to disk: they stay a
+  // draft until a save reaches the disk, even where the fields now match.
+  const drafts = new Map();
+  const reviewNotes = new Map(); // "deviceId|findingKey" -> acknowledgement note not yet sent
+
+  const annotationsOf = (d) => ({ name: d?.name || "", tags: (d?.tags || []).join(", "), notes: d?.notes || "" });
+  // Compared the way the server cleans them, so "Printer " or "B, a" is no change.
+  const tagKey = (s) => [...new Set(s.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean))].sort().join(",");
+  const sameAnnotations = (a, b) => a.name.trim() === b.name.trim() && tagKey(a.tags) === tagKey(b.tags) && a.notes.trim() === b.notes.trim();
+  const listDevice = (id) => devices().find((d) => d.id === id);
+  const baseDevice = (id) => (insp.device?.id === id ? insp.device : listDevice(id));
+
+  // openDevice shows a device. `from` is the control that asked, so focus
+  // can go back to it on close.
+  async function openDevice(id, { from = document.activeElement, refresh = false } = {}) {
+    if (!id) return;
+    const outside = from && from !== document.body && !dlg.contains(from);
+    if (!dlg.open) {
+      insp.origin = outside ? from : null;
+      insp.originKey = outside ? from.dataset?.focusKey || "" : "";
+      showInspector(true);
+    } else if (outside && !refresh) {
+      insp.origin = from;
+      insp.originKey = from.dataset?.focusKey || "";
+    }
+    const switching = id !== insp.id;
+    if (switching) {
+      insp.id = id;
+      insp.device = null;
+      insp.rescanning = "";
+      $("insp-status").textContent = "";
+      showPlaceholder(id);
+    }
+    state.currentDeviceId = id;
+    markOpenRow();
+    const mine = ++insp.seq;
     let d;
     try {
       d = await api("/api/devices/" + encodeURIComponent(id));
     } catch (e) {
+      if (mine === insp.seq) showInspectorError(e.message);
       return;
     }
-    state.currentDeviceId = id;
+    if (mine !== insp.seq) return; // another device was chosen meanwhile
+    insp.device = d;
+    renderInspector(d, !switching);
+  }
+
+  const refreshInspector = () => (dlg.open && insp.id ? openDevice(insp.id, { refresh: true }) : null);
+
+  function showInspector(first) {
+    const wide = wideInspector.matches;
+    const had = dlg.contains(document.activeElement) ? document.activeElement : null;
+    // Switching mode: the close event this queues finds the dialog open
+    // again, and is ignored.
+    if (dlg.open) dlg.close();
+    $("workspace").classList.toggle("has-side", wide);
+    setInspectorWidth(insp.width, false);
+    if (wide) dlg.show();
+    else dlg.showModal();
+    if (first) dlg.focus();
+    else had?.focus({ preventScroll: true });
+  }
+
+  wideInspector.addEventListener("change", () => {
+    if (dlg.open) showInspector(false);
+  });
+
+  dlg.addEventListener("close", () => {
+    if (dlg.open) return;
+    $("workspace").classList.remove("has-side");
+    insp.id = "";
+    insp.device = null;
+    insp.seq++;
+    state.currentDeviceId = "";
     markOpenRow();
+    hideFloatTip();
+    const back =
+      insp.origin && document.contains(insp.origin) && insp.origin.offsetParent !== null
+        ? insp.origin
+        : insp.originKey
+          ? visibleIn(document, `[data-focus-key="${CSS.escape(insp.originKey)}"]`)
+          : null;
+    back?.focus();
+    insp.origin = null;
+  });
+
+  // Other close requests on the modal inspector (Escape is handled on
+  // keydown below): ask about unsaved edits first.
+  dlg.addEventListener("cancel", (e) => {
+    e.preventDefault();
+    requestCloseInspector();
+  });
+  $("insp-close").addEventListener("click", () => requestCloseInspector());
+
+  async function requestCloseInspector(action = "close") {
+    if (!(await settleDrafts(action))) return false;
+    if (dlg.open) dlg.close();
+    return true;
+  }
+
+  // settleDrafts offers Save, Discard or Cancel for unsaved edits. It returns
+  // true when the caller may go ahead.
+  async function settleDrafts(action) {
+    if (!drafts.size) return true;
+    const choice = await askUnsaved(action);
+    if (choice === "discard") {
+      drafts.clear();
+      if (insp.id) fillAnnotations(insp.id, baseDevice(insp.id), false);
+      renderDevices();
+      syncInspectorBar();
+      return true;
+    }
+    if (choice !== "save" || !(await saveAllDrafts())) return false;
+    if (drafts.size) {
+      // Typed while the save was in flight: those are still unsaved.
+      $("insp-status").textContent = "You made more changes while saving. Save or discard them first.";
+      return false;
+    }
+    return true;
+  }
+
+  function askUnsaved(action) {
+    const names = [...drafts.values()].map((d) => `“${d.label}”`);
+    const list = names.length > 1 ? names.slice(0, -1).join(", ") + " and " + names.at(-1) : names[0];
+    $("guard-text").textContent = `You have unsaved changes to ${list}. Save them before ${action === "profile" ? "switching network" : "closing"}?`;
+    const g = $("guard");
+    g.returnValue = "";
+    g.showModal();
+    return new Promise((resolve) => g.addEventListener("close", () => resolve(g.returnValue || "cancel"), { once: true }));
+  }
+
+  // noteDraft keeps the draft in step with the three fields.
+  function noteDraft() {
+    const id = insp.id;
+    if (!id) return;
+    const cur = { name: $("insp-name").value, tags: $("insp-tags").value, notes: $("insp-notes").value };
+    const base = baseDevice(id);
+    const prev = drafts.get(id);
+    const had = !!prev;
+    if (sameAnnotations(cur, annotationsOf(base)) && !prev?.unwritten) drafts.delete(id);
+    else drafts.set(id, { ...cur, label: cur.name.trim() || devName(base || {}) || devIP(base || {}) || "this device", unwritten: !!prev?.unwritten });
+    if (had !== drafts.has(id)) renderDevices(); // the row's Unsaved mark
+    syncInspectorBar();
+  }
+
+  for (const id of ["insp-name", "insp-tags", "insp-notes"]) $(id).addEventListener("input", noteDraft);
+  $("insp-name").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      saveCurrent();
+    }
+  });
+  $("insp-notes").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) saveCurrent();
+  });
+
+  // fillAnnotations shows the device's draft, else its saved values. On a
+  // refresh the field being typed in is left alone.
+  function fillAnnotations(id, base, keepFocused) {
+    const v = drafts.get(id) || annotationsOf(base);
+    for (const [el, val] of [
+      [$("insp-name"), v.name],
+      [$("insp-tags"), v.tags],
+      [$("insp-notes"), v.notes],
+    ]) {
+      if (!(keepFocused && document.activeElement === el)) el.value = val;
+    }
+  }
+
+  function syncInspectorBar() {
+    const draft = drafts.get(insp.id);
+    $("insp-save").disabled = !draft || insp.saving;
+    $("insp-dirty").hidden = !draft;
+    $("insp-dirty").textContent = draft?.unwritten ? "Not saved to disk" : "Unsaved changes";
+    const running = !!state.polling;
+    const ip = devIP(baseDevice(insp.id) || {});
+    $("insp-rescan").textContent = running ? "Stop scan" : "Rescan";
+    $("insp-rescan").disabled = !running && !ip;
+    $("insp-rescan").title = running ? "Stop the scan that is running" : ip ? `Scan ${ip} again` : "";
+  }
+
+  // saveDraft sends a device's draft. It clears the draft only when what was
+  // sent is still the latest edit and it reached the disk. Edits typed while
+  // the request was in flight stay a draft, and so do edits the server kept
+  // in memory but could not write (saveError), so Save can try again.
+  async function saveDraft(id) {
+    const sent = drafts.get(id);
+    if (!sent) return { ok: true };
+    const tags = sent.tags
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+    let res;
+    try {
+      res = await post("/api/devices/" + encodeURIComponent(id), { name: sent.name, notes: sent.notes, tags });
+    } catch (e) {
+      return { ok: false, error: e.message, label: sent.label }; // the draft stays
+    }
+    const saved = res.device;
+    const shown = id === insp.id && saved;
+    if (shown) {
+      insp.device = saved;
+      fillHeader(saved);
+    }
+    const now = drafts.get(id);
+    if (res.saveError) {
+      drafts.set(id, { ...(now || sent), unwritten: true });
+      return { ok: false, error: `it was changed for this session but not written to disk (${res.saveError})`, label: sent.label };
+    }
+    if (now === sent) {
+      drafts.delete(id);
+      if (shown) fillAnnotations(id, saved, false);
+    } else if (now) {
+      // Newer edits: they stay unless they match what was just saved.
+      const newer = { ...now, unwritten: false };
+      if (saved && sameAnnotations(newer, annotationsOf(saved))) drafts.delete(id);
+      else drafts.set(id, newer);
+    }
+    return { ok: true, newer: drafts.has(id) };
+  }
+
+  async function saveCurrent() {
+    if (!drafts.has(insp.id) || insp.saving) return;
+    insp.saving = true;
+    syncInspectorBar();
+    $("insp-status").textContent = "Saving…";
+    const r = await saveDraft(insp.id);
+    insp.saving = false;
+    $("insp-status").textContent = !r.ok
+      ? `Could not save: ${r.error}. Your changes are kept; try again.`
+      : r.newer
+        ? "Saved. Your newer changes are not saved yet."
+        : "Saved.";
+    syncInspectorBar();
+    await loadInventory(); // the list shows what the server now holds
+  }
+  $("insp-save").addEventListener("click", saveCurrent);
+
+  async function saveAllDrafts() {
+    const failed = [];
+    for (const id of [...drafts.keys()]) {
+      const r = await saveDraft(id);
+      if (!r.ok) failed.push(`${r.label}: ${r.error}`);
+    }
+    await loadInventory();
+    syncInspectorBar();
+    if (failed.length) {
+      $("insp-status").textContent = `Could not save ${failed.join("; ")}. Those changes are kept.`;
+      return false;
+    }
+    return true;
+  }
+
+  function fillHeader(d) {
+    const h = d?.last?.host || {};
+    const ip = devIP(d || {});
+    const hint = humanizeText(h.hostname || identityHint(h, d?.last?.ports) || h.vendor || "");
+    $("insp-name").placeholder = hint || "Name this device";
+    $("insp-title").textContent = `Device ${stripBidi(d?.name || hint || ip)}`;
+    const mac = d?.mac || h.mac;
+    $("insp-sub").innerHTML = [ip && `<span class="mono">${escapeHtml(ip)}</span>`, mac && `<span class="mono">${escapeHtml(mac)}</span>`, h.vendor && escapeHtml(humanizeText(h.vendor))]
+      .filter(Boolean)
+      .join(" · ");
+  }
+
+  // showPlaceholder shows what the device list already knows while the
+  // details load: the name and address, and the editable notes.
+  function showPlaceholder(id) {
+    const d = listDevice(id);
+    fillHeader(d || { id });
+    fillAnnotations(id, d, false);
+    document.querySelectorAll("#insp-body .insp-live").forEach((el) => {
+      el.hidden = true;
+      el.innerHTML = "";
+    });
+    $("insp-state").innerHTML = `<p class="muted">Loading details…</p>`;
+    $("insp-body").scrollTop = 0;
+    syncInspectorBar();
+  }
+
+  function showInspectorError(message) {
+    $("insp-state").innerHTML = `<div class="banner is-error insp-error"><span>Could not load this device: ${escapeHtml(
+      message
+    )}</span> <button type="button" class="ghost" id="insp-retry">Retry</button></div>`;
+  }
+
+  $("insp-body").addEventListener("click", (e) => {
+    if (e.target.closest("#insp-retry")) {
+      $("insp-state").innerHTML = `<p class="muted">Loading details…</p>`;
+      refreshInspector();
+    }
+  });
+
+  function renderInspector(d, refresh) {
+    const body = $("insp-body");
+    const scroll = body.scrollTop;
+    const focusKey = body.contains(document.activeElement) ? document.activeElement.dataset.focusKey : "";
     const h = d.last?.host || {};
     const ports = d.last?.ports || [];
-    const name = devName(d);
+    fillHeader(d);
+    fillAnnotations(d.id, d, refresh);
 
     const identityRows = [
       ["Identified by", d.basis === "mac" ? "MAC address" : "IP address only"],
@@ -1207,64 +1535,40 @@
       ["First seen", fmtTime(d.firstSeen)],
       ["Last seen", `${fmtTime(d.lastSeen)}${d.seenInLatest ? "" : " (not in the latest scan)"}`],
     ].filter(([, v]) => v);
+    $("insp-overview").innerHTML = `<h3>Overview</h3>
+      <dl class="kv">${identityRows.map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd>`).join("")}</dl>
+      ${(d.uncertain || []).map((u) => `<p class="banner is-warn">${escapeHtml(u)}</p>`).join("")}
+      ${
+        (h.aliveVia || []).length
+          ? `<p class="context-label">How it was found</p><ul class="plain">${h.aliveVia
+              .map((v) => `<li><span class="via-chip">${escapeHtml(v)}</span> <span class="muted small">${escapeHtml(viaText(v))}</span></li>`)
+              .join("")}</ul>`
+          : ""
+      }
+      <p class="context-label">Addresses</p>
+      <ul class="plain">${(d.addresses || [])
+        .map((a) => `<li><span class="mono">${escapeHtml(a.ip)}</span> <span class="muted small">${escapeHtml(fmtTime(a.first))} – ${escapeHtml(fmtTime(a.last))}</span></li>`)
+        .join("")}</ul>`;
 
     const certs = ports.filter((p) => p.tlsCommonName || p.tlsIssuer);
-    const html = `
-      <section class="detail-section">
-        <h3>Your notes</h3>
-        <form id="annotate-form" class="annotate">
-          <label class="field"><span>Name</span><input id="a-name" type="text" maxlength="80" value="${escapeHtml(d.name || "")}" placeholder="${escapeHtml(
-            name || "Give this device a name"
-          )}" /></label>
-          <label class="field"><span>Tags <small class="muted">(comma separated)</small></span><input id="a-tags" type="text" maxlength="400" value="${escapeHtml(
-            (d.tags || []).join(", ")
-          )}" /></label>
-          <label class="field"><span>Notes</span><textarea id="a-notes" rows="3" maxlength="4000">${escapeHtml(d.notes || "")}</textarea></label>
-          <div class="form-actions">
-            <button type="submit" class="primary">Save notes</button>
-            <button type="button" class="ghost" id="rescan-device" ${devIP(d) && !state.polling ? "" : "disabled"}${state.polling ? ` title="A scan is running."` : ""}>Rescan this device</button>
-            <span id="annotate-status" class="status-line" aria-live="polite"></span>
-          </div>
-        </form>
-      </section>
-      <section class="detail-section">
-        <h3>Identity</h3>
-        <dl class="kv">${identityRows.map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd>`).join("")}</dl>
-        ${(d.uncertain || []).map((u) => `<p class="banner is-warn">${escapeHtml(u)}</p>`).join("")}
-        ${
-          (h.aliveVia || []).length
-            ? `<p class="context-label">How it was found</p><ul class="plain">${h.aliveVia
-                .map((v) => `<li><span class="via-chip">${escapeHtml(v)}</span> <span class="muted small">${escapeHtml(viaText(v))}</span></li>`)
-                .join("")}</ul>`
-            : ""
-        }
-      </section>
-      <section class="detail-section">
-        <h3>Addresses</h3>
-        <ul class="plain">${(d.addresses || [])
-          .map((a) => `<li><span class="mono">${escapeHtml(a.ip)}</span> <span class="muted">${escapeHtml(fmtTime(a.first))} – ${escapeHtml(fmtTime(a.last))}</span></li>`)
-          .join("")}</ul>
-      </section>
-      <section class="detail-section">
-        <h3>Services (${ports.length})</h3>
-        ${
-          ports.length
-            ? `<ul class="plain services">${ports
-                .map(
-                  (p) => `<li><span class="mono">${escapeHtml(p.port)}/${escapeHtml(p.service)}</span>
-                  ${p.protocol ? `<span class="tag-pill self">confirmed ${escapeHtml(p.protocol)}</span>` : `<span class="tag-pill">port only</span>`}
-                  ${portEnrichLines(p)
-                    .filter((l) => !l.startsWith("Answered as"))
-                    .map((l) => `<div class="muted small">${escapeHtml(l)}</div>`)
-                    .join("")}</li>`
-                )
-                .join("")}</ul>`
-            : `<p class="muted">No findings ports answered in the latest observation.</p>`
-        }
-      </section>
+    $("insp-services").innerHTML = `<h3>Services <span class="count-pill">${ports.length}</span></h3>
+      ${
+        ports.length
+          ? `<ul class="plain services">${ports
+              .map(
+                (p) => `<li><span class="mono">${escapeHtml(p.port)}/${escapeHtml(p.service)}</span>
+                ${p.protocol ? `<span class="tag-pill self">confirmed ${escapeHtml(p.protocol)}</span>` : `<span class="tag-pill">port only</span>`}
+                ${portEnrichLines(p)
+                  .filter((l) => !l.startsWith("Answered as"))
+                  .map((l) => `<div class="muted small">${escapeHtml(l)}</div>`)
+                  .join("")}</li>`
+              )
+              .join("")}</ul>`
+          : `<p class="muted">No findings ports answered in the latest observation.</p>`
+      }
       ${
         certs.length
-          ? `<section class="detail-section"><h3>Certificates</h3><ul class="plain">${certs
+          ? `<p class="context-label">Certificates</p><ul class="plain">${certs
               .map(
                 (p) =>
                   `<li><span class="mono">:${escapeHtml(p.port)}</span> ${escapeHtml(p.tlsCommonName || "(no CN)")} <span class="muted">· issuer ${escapeHtml(
@@ -1273,56 +1577,111 @@
                     p.tlsSelfSigned ? " · self-signed" : ""
                   }</span></li>`
               )
-              .join("")}</ul></section>`
+              .join("")}</ul>`
           : ""
-      }
-      <section class="detail-section">
-        <h3>Findings (${(d.findings || []).length})</h3>
-        ${(d.findings || []).length ? (d.findings || []).map((f) => findingCard(f)).join("") : `<p class="muted">None in the latest observation.</p>`}
-      </section>
-      <section class="detail-section">
-        <h3>Observation history</h3>
-        ${
-          (d.history || []).length
-            ? `<div class="table-wrap"><table class="mini-table"><thead><tr><th>Scan</th><th>Address</th><th>Open ports</th><th>Findings</th></tr></thead><tbody>${[...d.history]
-                .reverse()
-                .map(
-                  (e) => `<tr><td>${escapeHtml(fmtTime(e.at))}${e.partial ? ` <span class="tag-pill guess">partial</span>` : ""}</td><td class="mono">${escapeHtml(
-                    e.ip
-                  )}</td><td class="mono">${escapeHtml((e.ports || []).join(", ") || "—")}</td><td>${escapeHtml(e.findings)}</td></tr>`
-                )
-                .join("")}</tbody></table></div>`
-            : `<p class="muted">No retained scans include this device.</p>`
-        }
-      </section>`;
+      }`;
 
-    openModal(name || devIP(d) || "Device", devIP(d) + (d.mac ? " · " + d.mac : ""), html, focus);
-    const body = $("modal-body");
-    $("annotate-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const tags = $("a-tags")
-        .value.split(",")
-        .map((t) => t.trim())
-        .filter(Boolean);
-      const out = $("annotate-status");
-      try {
-        const res = await post("/api/devices/" + encodeURIComponent(id), { name: $("a-name").value, notes: $("a-notes").value, tags });
-        out.textContent = res.saveError ? "Changed for this session, but saving failed: " + res.saveError : "Saved.";
-        $("modal-title").textContent = stripBidi(res.device.name || name || devIP(d));
-        await loadInventory();
-      } catch (err) {
-        out.textContent = err.message;
-      }
-    });
-    $("rescan-device").addEventListener("click", () => {
-      const ip = devIP(d);
-      closeModal();
-      activateTab("devices", false);
-      startScan([ip + "/32"], `Rescanning ${ip}…`);
-    });
-    bindReviewControls(body, () => openDevice(id, false));
+    const findings = d.findings || [];
+    $("insp-findings").innerHTML = `<h3>Findings <span class="count-pill">${findings.length}</span></h3>
+      ${findings.length ? findings.map((f) => findingCard(f)).join("") : `<p class="muted">None in the latest observation.</p>`}`;
+
+    $("insp-history").innerHTML = `<h3>Observation history</h3>
+      ${
+        (d.history || []).length
+          ? `<div class="table-wrap"><table class="mini-table"><thead><tr><th>Scan</th><th>Address</th><th>Open ports</th><th>Findings</th></tr></thead><tbody>${[...d.history]
+              .reverse()
+              .map(
+                (e) => `<tr><td>${escapeHtml(fmtTime(e.at))}${e.partial ? ` <span class="tag-pill guess">partial</span>` : ""}</td><td class="mono">${escapeHtml(
+                  e.ip
+                )}</td><td class="mono">${escapeHtml((e.ports || []).join(", ") || "—")}</td><td>${escapeHtml(e.findings)}</td></tr>`
+              )
+              .join("")}</tbody></table></div>`
+          : `<p class="muted">No retained scans include this device.</p>`
+      }`;
+
+    document.querySelectorAll("#insp-body .insp-live").forEach((el) => (el.hidden = false));
+    $("insp-state").innerHTML = "";
+    bindReviewControls(body);
     bindFloatTips(body);
+    if (refresh) {
+      body.scrollTop = scroll;
+      if (focusKey) visibleIn(body, `[data-focus-key="${CSS.escape(focusKey)}"]`)?.focus({ preventScroll: true });
+    }
+    syncInspectorBar();
   }
+
+  $("insp-rescan").addEventListener("click", async () => {
+    if (state.polling) return $("stop-btn").click();
+    const ip = devIP(baseDevice(insp.id) || {});
+    if (!ip) return;
+    // Behind a modal inspector, Devices is where the scan's results land.
+    if (!wideInspector.matches) activateTab("devices", false);
+    insp.rescanning = insp.id;
+    $("insp-status").textContent = `Rescanning ${ip}…`;
+    const problem = await startScan([ip + "/32"], `Rescanning ${ip}…`);
+    if (problem) {
+      insp.rescanning = "";
+      $("insp-status").textContent = problem;
+    }
+  });
+
+  // The side inspector's width: dragged or set from the keyboard, and
+  // remembered. It is shown between 360px and half the window, so a narrow
+  // window does not shrink the width chosen for a wider one.
+  const inspMax = () => Math.max(INSP_MIN, Math.floor(window.innerWidth / 2));
+  const appliedWidth = () => Math.round(Math.min(Math.max(insp.width, INSP_MIN), inspMax()));
+
+  function setInspectorWidth(w, save) {
+    insp.width = Math.round(w);
+    if (save) {
+      insp.width = appliedWidth(); // a drag past the limits stops at them
+      remember(INSP_WIDTH_KEY, String(insp.width));
+    }
+    const width = appliedWidth();
+    $("workspace").style.setProperty("--insp-w", width + "px");
+    const handle = $("insp-resize");
+    handle.setAttribute("aria-valuemax", String(inspMax()));
+    handle.setAttribute("aria-valuenow", String(width));
+  }
+
+  $("insp-resize").addEventListener("pointerdown", (e) => {
+    const handle = e.currentTarget;
+    const startX = e.clientX;
+    const startW = appliedWidth();
+    handle.setPointerCapture(e.pointerId);
+    document.body.classList.add("is-resizing");
+    const move = (ev) => setInspectorWidth(Math.min(Math.max(startW + (startX - ev.clientX), INSP_MIN), inspMax()), false);
+    const up = () => {
+      handle.removeEventListener("pointermove", move);
+      document.body.classList.remove("is-resizing");
+      setInspectorWidth(insp.width, true);
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up, { once: true });
+    handle.addEventListener("pointercancel", up, { once: true });
+  });
+
+  $("insp-resize").addEventListener("keydown", (e) => {
+    const step = e.shiftKey ? 64 : 16;
+    const cur = appliedWidth();
+    const next = { ArrowLeft: cur + step, ArrowRight: cur - step, Home: INSP_MIN, End: inspMax() }[e.key];
+    if (next === undefined) return;
+    e.preventDefault();
+    setInspectorWidth(next, true);
+  });
+
+  window.addEventListener("resize", () => setInspectorWidth(insp.width, false));
+  setInspectorWidth(insp.width, false);
+
+  // Unsent acknowledgement notes survive re-renders too.
+  document.addEventListener("input", (e) => {
+    const key = e.target.dataset?.noteKey;
+    if (key) reviewNotes.set(key, e.target.value);
+  });
+
+  window.addEventListener("beforeunload", (e) => {
+    if (drafts.size) e.preventDefault();
+  });
 
   // ---------- findings ----------
 
@@ -1338,11 +1697,16 @@
           `<li><span class="ev-method">${escapeHtml(e.method)}</span> ${escapeHtml(e.summary)}${e.endpoint ? ` <span class="mono muted">${escapeHtml(e.endpoint)}</span>` : ""}</li>`
       )
       .join("");
+    const noteKey = `${f.deviceId}|${findingKey(f)}`;
     const reviewHtml =
       review.status === "open"
         ? `<div class="review-row">
-            <label class="field compact grow"><span class="sr-only">Note for ${escapeHtml(f.title)}</span><input type="text" maxlength="1000" placeholder="Why this is expected (optional)" data-review-note /></label>
-            <button type="button" class="ghost compact" data-review="ack" data-key="${escapeHtml(findingKey(f))}" data-device-id="${escapeHtml(f.deviceId)}">Acknowledge</button>
+            <label class="field compact grow"><span class="sr-only">Note for ${escapeHtml(f.title)}</span><input type="text" maxlength="1000" placeholder="Why this is expected (optional)" data-review-note data-note-key="${escapeHtml(
+              noteKey
+            )}" data-focus-key="note-${escapeHtml(noteKey)}" value="${escapeHtml(reviewNotes.get(noteKey) || "")}" /></label>
+            <button type="button" class="ghost compact" data-review="ack" data-key="${escapeHtml(findingKey(f))}" data-device-id="${escapeHtml(f.deviceId)}" data-focus-key="ack-${escapeHtml(
+              noteKey
+            )}">Acknowledge</button>
           </div>`
         : `<div class="review-row">
             <span class="review-state ${escapeHtml(review.status)}">${
@@ -1373,26 +1737,33 @@
     </article>`;
   }
 
-  function bindReviewControls(root, after) {
+  // bindReviewControls wires review buttons and "Open device" links in a
+  // freshly rendered list. Outcomes are reported inside the inspector when
+  // the buttons are there, else on Devices.
+  function bindReviewControls(root) {
+    const status = dlg.contains(root) ? $("insp-status") : null;
     root.querySelectorAll("[data-review]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
+      btn.addEventListener("click", () => {
         const ack = btn.dataset.review === "ack";
         const note = btn.closest(".review-row")?.querySelector("[data-review-note]")?.value || "";
-        await setReview(btn.dataset.deviceId, btn.dataset.key, ack, note);
-        after?.();
+        setReview(btn.dataset.deviceId, btn.dataset.key, ack, note, status);
       });
     });
     root.querySelectorAll("[data-open-device]").forEach((btn) => {
-      btn.addEventListener("click", () => openDevice(btn.dataset.openDevice));
+      btn.addEventListener("click", () => openDevice(btn.dataset.openDevice, { from: btn }));
     });
   }
 
-  async function setReview(deviceId, key, acknowledged, note) {
+  async function setReview(deviceId, key, acknowledged, note, status) {
     try {
       const res = await post("/api/devices/" + encodeURIComponent(deviceId) + "/review", { key, acknowledged, note });
-      if (res.saveError) setScanNote("Review changed for this session, but saving failed: " + res.saveError);
+      reviewNotes.delete(`${deviceId}|${key}`);
+      const warn = res.saveError ? "Review changed for this session, but saving failed: " + res.saveError : "";
+      if (status) status.textContent = warn;
+      else if (warn) setScanNote(warn);
     } catch (e) {
-      $("scan-status").textContent = e.message;
+      (status || $("scan-status")).textContent = "Could not change the review: " + e.message;
+      return;
     }
     await loadInventory();
   }
@@ -1482,12 +1853,12 @@
           </summary>
           <div class="host-risk-items">
             ${items.map((f) => findingCard(f)).join("")}
-            <button type="button" class="ghost compact" data-open-device="${escapeHtml(id)}">Open device</button>
+            <button type="button" class="ghost compact" data-open-device="${escapeHtml(id)}" data-focus-key="fo-${escapeHtml(id)}">Open device</button>
           </div>
         </details>`;
       })
       .join("")}</div>`;
-    bindReviewControls($("findings"), null);
+    bindReviewControls($("findings"));
   }
 
   // ---------- history and changes ----------
@@ -1598,7 +1969,10 @@
       )
       .join("");
     el.innerHTML = head + scope + (sections || `<p class="empty">No differences between these scans.</p>`);
-    el.querySelectorAll("[data-open-device]").forEach((b) => b.addEventListener("click", () => openDevice(b.dataset.openDevice)));
+    el.querySelectorAll("[data-open-device]").forEach((b, i) => {
+      b.dataset.focusKey = `chg-${i}`;
+      b.addEventListener("click", () => openDevice(b.dataset.openDevice, { from: b }));
+    });
   }
 
   // ---------- settings ----------
@@ -1647,6 +2021,9 @@
     try {
       await post("/api/history/delete", { what: "all" });
       $("data-result").textContent = "All saved data deleted.";
+      drafts.clear();
+      reviewNotes.clear();
+      if (dlg.open) dlg.close();
       $("profile-select").innerHTML = "";
       await refreshAll();
     } catch (e) {
@@ -2308,13 +2685,13 @@
     $("ai-thread").addEventListener("click", (e) => {
       if (e.target.closest("#ai-start")) aiSend();
       const chip = e.target.closest(".ai-ref[data-id]");
-      if (chip) openDevice(chip.dataset.id);
+      if (chip) openDevice(chip.dataset.id, { from: chip });
     });
     $("ai-dev-list").addEventListener("click", (e) => {
       const mention = e.target.closest(".ai-mention");
       if (mention) return aiMention(mention.dataset.ref);
       const main = e.target.closest(".ai-dev-main");
-      if (main) openDevice(main.dataset.id);
+      if (main) openDevice(main.dataset.id, { from: main });
     });
     for (const id of ["ai-thread", "ai-dev-list"]) {
       $(id).addEventListener("mouseover", (e) => {
@@ -2398,61 +2775,6 @@
     download("/api/export?what=inventory" + (state.inv?.profileId ? "&profile=" + encodeURIComponent(state.inv.profileId) : ""))
   );
 
-  // ---------- modal ----------
-
-  let modalReturnFocus = null;
-
-  function openModal(title, sub, html, focus = true) {
-    const modal = $("modal");
-    const wasOpen = !modal.hidden;
-    if (!wasOpen) modalReturnFocus = document.activeElement;
-    $("modal-title").textContent = stripBidi(title);
-    $("modal-sub").textContent = stripBidi(sub || "");
-    const scroll = $("modal-body").scrollTop;
-    $("modal-body").innerHTML = html;
-    modal.hidden = false;
-    document.body.classList.add("modal-open");
-    if (wasOpen) $("modal-body").scrollTop = scroll;
-    if (focus && !wasOpen) modal.querySelector(".modal-close")?.focus();
-  }
-
-  function closeModal() {
-    const modal = $("modal");
-    if (modal.hidden) return;
-    modal.hidden = true;
-    document.body.classList.remove("modal-open");
-    $("modal-body").innerHTML = "";
-    state.currentDeviceId = "";
-    markOpenRow();
-    hideFloatTip();
-    if (modalReturnFocus && document.contains(modalReturnFocus)) modalReturnFocus.focus();
-    modalReturnFocus = null;
-  }
-
-  $("modal").addEventListener("click", (e) => {
-    if (e.target.closest("[data-close-modal]")) closeModal();
-  });
-
-  // Keep Tab inside the dialog while it is open.
-  $("modal").addEventListener("keydown", (e) => {
-    if (e.key !== "Tab") return;
-    const focusable = [
-      ...$("modal").querySelectorAll(
-        '.modal-dialog button:not([disabled]), .modal-dialog input:not([disabled]), .modal-dialog textarea, .modal-dialog select, .modal-dialog a[href], .modal-dialog [tabindex="0"]'
-      ),
-    ].filter((el) => el.offsetParent !== null);
-    if (!focusable.length) return;
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    if (e.shiftKey && document.activeElement === first) {
-      e.preventDefault();
-      last.focus();
-    } else if (!e.shiftKey && document.activeElement === last) {
-      e.preventDefault();
-      first.focus();
-    }
-  });
-
   // ---------- tooltips ----------
 
   const floatTip = $("float-tip");
@@ -2490,10 +2812,21 @@
     });
   }
 
+  // Escape hides a tooltip, else closes the inspector: always when modal,
+  // and when the side inspector or the device list has focus. It is handled
+  // here, not as the dialog's cancel event, because a browser may skip a
+  // cancel listener on a repeated Escape; preventing the keydown stops the
+  // browser closing the dialog itself, so the unsaved-edit guard always runs.
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") {
-      if (!floatTip.hidden) hideFloatTip();
-      else closeModal();
+    if (e.key !== "Escape" || e.defaultPrevented || $("guard").open) return;
+    if (!floatTip.hidden) {
+      e.preventDefault();
+      return hideFloatTip();
+    }
+    const at = document.activeElement;
+    if (dlg.open && (dlg.matches(":modal") || dlg.contains(at) || $("hosts").contains(at) || at === document.body)) {
+      e.preventDefault();
+      requestCloseInspector();
     }
   });
   window.addEventListener("scroll", hideFloatTip, true);

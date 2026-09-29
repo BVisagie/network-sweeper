@@ -208,7 +208,9 @@ func TestWriteUIData(t *testing.T) {
 			annotate(snap, "192.0.2.5", "Upstairs hallway access point, ceiling mount, PoE from switch port 7",
 				"Replaced the old AP in March. Firmware updates are automatic.",
 				"network", "wifi", "poe", "upstairs", "ceiling", "ubiquiti", "managed", "u6-lite", "second-floor", "installed-2026")
-			annotate(snap, "192.0.2.7", "Old PC in the garage", "Kept for the lathe controller software. Do not update.", "garage", "legacy")
+			annotate(snap, "192.0.2.7", "Old PC in the garage", "Kept for the lathe controller software. Do not update: the vendor's installer only runs on this build.\n\n"+
+				"Telnet and FTP are how the lathe pulls its programs. Both are blocked at the router for everything outside the garage VLAN.\n\n"+
+				"If it dies: the disk image is on the NAS under backups/garage-pc, and the licence dongle is in the drawer under the bench.", "garage", "legacy")
 			annotate(snap, "192.0.2.8", "Dev box", "", "dev", "lab")
 			annotate(snap, "192.0.2.9", "Printer", "", "office", "printer")
 			annotate(snap, "192.0.2.12", "Guest laptop", "", "guest", "visitor")
@@ -220,7 +222,7 @@ func TestWriteUIData(t *testing.T) {
 			annotate(snap, "192.0.2.44", "OctoPrint", "", "3d-printer", "lab")
 			annotate(snap, "192.0.2.45", "Media PC", "", "living-room", "media")
 			annotate(snap, "192.0.2.50", "Test bench Pi",
-				"Draft-edit check: change this device's name, tags or notes without saving, let a scan finish, and confirm the edits are still there.",
+				"Draft checks: edit the name, tags or notes without saving, then let a scan finish, resize across 1200px, and switch to another device and back. The edits stay until Save or Discard; closing with edits pending asks first.",
 				"lab", "test")
 		case 2:
 			annotate(snap, "192.0.2.6", "Phone", "", "family", "phone")
