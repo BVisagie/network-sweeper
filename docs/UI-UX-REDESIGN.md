@@ -1,6 +1,6 @@
 # Network Sweeper: muted desktop console redesign
 
-Status: proposed, pending further review. No implementation has started.
+Status: stage 1 (Shell) is in review. Stages 2–4 have not started.
 
 This plan delivers the device workspace described in Release 1 of the roadmap (`docs/ROADMAP.md` on the `planning/network-sweeper-roadmap` branch). Once the last stage below has merged, fold what remains useful here into a UI section of `docs/ARCHITECTURE.md` and delete this file.
 
@@ -82,10 +82,10 @@ Stage 3 carries the most behaviour change and gets its own manual verification p
 - **Synthetic data.** There is no browser test harness and CI runs Go only, so UI verification is manual or agent-driven, not automated. To make it repeatable, commit a synthetic data directory under `testdata/ui/` in the store's own format (`inventory.json` plus `scans/<id>.json`), copy it to a temporary directory, and run the binary against it:
 
   ```bash
-  cp -r testdata/ui /tmp/ns-ui && go run ./cmd/networksweeper -no-browser -data-dir /tmp/ns-ui
+  d=$(mktemp -d) && cp -r testdata/ui "$d/ui" && go run ./cmd/networksweeper -no-browser -data-dir "$d/ui"
   ```
 
-  The data set covers long names, many tags/services, multiple profiles, findings of every status, partial scans, and a device with a pending-edit scenario. Unavailable AI, empty results, disconnection, and failed saves are exercised by stopping the binary or the backend rather than by data.
+  The data set covers long names, many tags/services, multiple profiles, findings of every status, partial scans, and a device with a pending-edit scenario. Unavailable AI, empty results, disconnection, and failed saves are exercised by stopping the binary or the backend rather than by data. `TestWriteUIData` in `internal/inventory` writes it through the store itself and runs only when asked (`NS_WRITE_UI_DATA=1 go test ./internal/inventory -run TestWriteUIData`). Every address is in a documentation range (192.0.2.0/24, 198.51.100.0/24), so a rescan from the UI never reaches a real device.
 - Inspect every view at **1920×1080, 1440×900, 1280×720, 960×720, 800×700, and 640×700**, plus a 390px fallback and 200% browser zoom.
 - Acceptance: no page-level horizontal scrolling at supported widths; no clipped controls; essential inventory fields remain visible; the collapsed default Devices view shows at least five **ordinary rows** at 640×700, where an ordinary row is a device with a name, one badge, two tags, and four services.
 - Verify keyboard-only navigation, inspector resizing, draft preservation across a finished scan, rapid device switching, filter/sort retention, scan cancellation from a non-Devices tab, annotations, finding review, comparison, exports, and AI setup/chat using the synthetic data and a stopped or absent backend.

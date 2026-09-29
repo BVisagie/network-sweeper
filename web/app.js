@@ -325,6 +325,7 @@
     if ($("consent").hidden) return;
     $("consent").hidden = true;
     $("main").hidden = false;
+    $("tabs").hidden = false;
     init();
   }
 
@@ -391,18 +392,22 @@
     });
   });
 
-  function showCapabilities() {
+  // showSettingsPanel opens Settings at one panel and moves focus to its heading.
+  function showSettingsPanel(id) {
     activateTab("settings", false);
-    $("capabilities").scrollIntoView({ block: "start" });
-    $("capabilities").querySelector("h3")?.setAttribute("tabindex", "-1");
-    $("capabilities").querySelector("h3")?.focus();
+    const heading = $(id).querySelector("h3");
+    $(id).scrollIntoView({ block: "start" });
+    heading?.setAttribute("tabindex", "-1");
+    heading?.focus({ preventScroll: true });
   }
+  const showCapabilities = () => showSettingsPanel("capabilities");
   $("caps-link").addEventListener("click", showCapabilities);
+  $("priv-badge").addEventListener("click", showCapabilities);
+  $("storage-badge").addEventListener("click", () => showSettingsPanel("storage"));
 
   // ---------- init ----------
 
   async function init() {
-    $("version").textContent = formatVersion(window.__NS_VERSION__);
     try {
       const [session, ifaces, plat] = await Promise.all([api("/api/session"), api("/api/interfaces"), api("/api/platform")]);
       state.session = session;
@@ -447,9 +452,9 @@
     const os = state.plat.os || "unknown";
     const elevated = !!state.session.elevated;
     const priv = $("priv-badge");
+    priv.hidden = false;
     priv.textContent = privilegeLabel(os, elevated);
-    priv.classList.toggle("is-elevated", elevated);
-    priv.classList.toggle("is-standard", !elevated);
+    priv.classList.toggle("is-warn", !elevated);
     priv.title = elevated
       ? "This process has elevated privileges. Deep discovery can use ping (and ARP on Linux/macOS)."
       : elevationHowTo(os).detail;
@@ -2327,5 +2332,6 @@
   window.addEventListener("scroll", hideFloatTip, true);
   window.addEventListener("resize", hideFloatTip);
 
+  $("version").textContent = formatVersion(window.__NS_VERSION__);
   prepConsent();
 })();
