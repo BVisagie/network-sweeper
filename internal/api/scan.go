@@ -135,6 +135,8 @@ func (s *Server) planScan(req scanRequest, local []*net.IPNet) (*scanPlan, error
 	}
 
 	plan.deepRequested = req.Deep
+	elevated := s.Elevated
+	plan.Elevated = &elevated
 	plan.Deep = req.Deep && s.Elevated
 	plan.useICMP = runtime.GOOS == "windows" || plan.Deep
 	plan.useARP = plan.Deep && discover.ARPSweepSupported()

@@ -573,6 +573,7 @@
   function syncScanButton() {
     const running = !!state.polling;
     $("scan-btn").disabled = running || !(state.preview && state.preview.ok);
+    $("analyze-btn").hidden = running || !state.inv?.latestScan;
   }
 
   $("targets").addEventListener("input", updatePreview);
@@ -714,6 +715,7 @@
     renderDevices();
     renderFindings();
     renderSettingsData();
+    syncScanButton();
   }
 
   function renderProfiles() {
@@ -1551,6 +1553,94 @@
       <ul class="notes">${notes}</ul>
     `;
   }
+
+  // ---------- AI analysis ----------
+
+  // Shows a prompt, for any AI model, built from the latest scan. Nothing is
+  // sent from here: the user reads the risk notice, then copies or saves it.
+  function openAnalysis() {
+    const latest = state.inv?.latestScan;
+    if (!latest) return;
+    const html = `
+      <p class="banner is-warn">This prompt describes your network: its devices, open services, software versions, and possible weak spots. AI services may keep what you paste, log it, or train on it. Network Sweeper sends nothing itself. Masking hides MAC addresses, names, tags, and notes, but IP addresses, vendors, and services stay. A model on your own computer, or a provider you trust, is safest. Sharing it is at your own risk.</p>
+      <section class="detail-section ai-analysis">
+        <label class="check"><input type="checkbox" id="ai-ack" /><span>I understand the risk of sharing this.</span></label>
+        <div class="ai-masks">
+          <label class="check inline"><input type="checkbox" id="ai-mask-macs" checked /><span>Mask MAC addresses</span></label>
+          <label class="check inline"><input type="checkbox" id="ai-mask-names" checked /><span>Mask device names, hostnames, tags, and notes</span></label>
+        </div>
+        <label class="field"><span>Prompt <small class="muted">(unlocks once you tick the box above; you can edit it, and changing a mask rebuilds it)</small></span>
+          <textarea id="ai-prompt" class="ai-prompt" rows="14" spellcheck="false" disabled>Building the prompt…</textarea></label>
+        <p id="ai-stats" class="muted small"></p>
+        <p class="help">Paste it into any capable AI chat. The model will probably ask you a few questions about your network first; answering them gets you better advice. Take care what you share in those answers too.</p>
+        <div class="form-actions">
+          <button type="button" class="primary" id="ai-copy" disabled>Copy prompt</button>
+          <button type="button" class="ghost" id="ai-download" disabled>Download .md</button>
+          <span id="ai-status" class="status-line" aria-live="polite"></span>
+        </div>
+      </section>`;
+    openModal(`Analyze with AI · scan of ${fmtTime(latest.finishedAt)}`, "", html);
+
+    const area = $("ai-prompt");
+    const status = $("ai-status");
+    let counts = null;
+    let seq = 0;
+    const sync = () => {
+      // The prompt stays locked (no selecting, editing or copying by hand)
+      // until the risk is acknowledged.
+      const ok = !!counts && $("ai-ack").checked;
+      area.disabled = !ok;
+      $("ai-copy").disabled = !ok;
+      $("ai-download").disabled = !ok;
+      $("ai-stats").textContent = counts
+        ? `About ${fmtNumber(Math.ceil(area.value.length / 4))} tokens · ${plural(counts.devices, "device")} · ${plural(counts.findings, "finding")}`
+        : "";
+    };
+    const load = async () => {
+      const mine = ++seq;
+      counts = null;
+      sync();
+      const q = new URLSearchParams({ maskMacs: $("ai-mask-macs").checked ? "1" : "0", maskNames: $("ai-mask-names").checked ? "1" : "0" });
+      if (state.inv.profileId) q.set("profile", state.inv.profileId);
+      try {
+        const res = await api("/api/analysis-prompt?" + q);
+        if (mine !== seq || !document.contains(area)) return;
+        area.value = res.prompt;
+        counts = res.stats;
+        status.textContent = "";
+      } catch (e) {
+        if (mine !== seq || !document.contains(area)) return;
+        area.value = "";
+        status.textContent = "Could not build the prompt: " + e.message;
+      }
+      sync();
+    };
+    $("ai-mask-macs").addEventListener("change", load);
+    $("ai-mask-names").addEventListener("change", load);
+    $("ai-ack").addEventListener("change", sync);
+    area.addEventListener("input", sync);
+    $("ai-copy").addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(area.value);
+        status.textContent = "Copied. Paste it into the AI chat you chose.";
+      } catch {
+        area.select();
+        status.textContent = document.execCommand("copy") ? "Copied. Paste it into the AI chat you chose." : "Could not copy. Select the text and copy it yourself.";
+      }
+    });
+    $("ai-download").addEventListener("click", () => {
+      const url = URL.createObjectURL(new Blob([area.value], { type: "text/markdown" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "network-sweeper-analysis-prompt.md";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    });
+    load();
+  }
+  $("analyze-btn").addEventListener("click", openAnalysis);
 
   // ---------- export ----------
 

@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
+	"runtime"
 	"sort"
 
+	"github.com/BVisagie/network-sweeper/internal/analysis"
 	"github.com/BVisagie/network-sweeper/internal/inventory"
 	"github.com/BVisagie/network-sweeper/internal/risk"
+	"github.com/BVisagie/network-sweeper/internal/version"
 )
 
 const maxBody = 64 << 10
@@ -217,4 +220,49 @@ func (s *Server) handleDeleteHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"status": "deleted"})
+}
+
+// handleAnalysisPrompt builds the AI analysis prompt for the profile's latest
+// scan. MACs and names are masked unless maskMacs=0 / maskNames=0. Nothing is
+// sent anywhere: the UI shows the text for the user to copy.
+func (s *Server) handleAnalysisPrompt(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	profileID := s.profileParam(r)
+	latest := s.latestScan(profileID)
+	if latest == nil {
+		http.Error(w, "no scan to analyze yet", http.StatusNotFound)
+		return
+	}
+	snap, err := s.Store.Snapshot(latest.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	in := analysis.Input{
+		AppVersion: version.Version,
+		OS:         runtime.GOOS,
+		Scan:       snap,
+	}
+	for _, p := range s.Store.Profiles() {
+		if p.ID == profileID {
+			in.Network = p.Name
+		}
+	}
+	for _, d := range s.Store.Devices(profileID) {
+		v := s.view(d, latest, false)
+		dev := analysis.Device{Device: v.Device, SeenInLatest: v.SeenInLatest, New: v.New}
+		for _, f := range v.Findings {
+			dev.Findings = append(dev.Findings, analysis.Finding{Finding: f.Finding, Review: f.Review})
+		}
+		in.Devices = append(in.Devices, dev)
+	}
+	// An error only means there is no earlier scan of this network.
+	if c, err := s.Store.Compare(profileID, latest.ID, ""); err == nil {
+		in.Changes = c
+	}
+	text, stats := analysis.Build(in, analysis.Options{
+		MaskMACs:  q.Get("maskMacs") != "0",
+		MaskNames: q.Get("maskNames") != "0",
+	})
+	writeJSON(w, map[string]any{"prompt": text, "stats": stats})
 }

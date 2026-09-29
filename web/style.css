@@ -1418,6 +1418,7 @@ body.modal-open { overflow: hidden; }
   font-family: var(--mono);
   font-size: 0.82rem;
 }
+.modal-sub:empty { display: none; }
 
 .modal-close {
   min-height: 2.1rem;
@@ -1691,6 +1692,13 @@ body.modal-open { overflow: hidden; }
 }
 
 .annotate { display: grid; gap: 0.6rem; }
+
+.ai-analysis { display: grid; gap: 0.6rem; }
+.banner + .ai-analysis { margin-top: 0.9rem; }
+.ai-analysis .check { margin: 0; }
+.ai-masks { display: flex; flex-wrap: wrap; gap: 0 1.2rem; }
+.field textarea.ai-prompt { min-height: 12rem; max-height: 45vh; font-family: var(--mono); font-size: 0.78rem; }
+.field textarea.ai-prompt:disabled { opacity: 0.45; cursor: not-allowed; resize: none; }
 
 .form-actions {
   display: flex;

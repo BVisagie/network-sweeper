@@ -15,6 +15,8 @@ internal/discover      TCP discovery, optional ICMP/ARP, ARP cache MAC, reverse 
 internal/scan          Findings-port TCP connect scan + service labels
 internal/enrich        Short HTTP title/Server, TLS cert summary, SSH/FTP/SMTP banners
 internal/risk          Findings with category, confidence, and evidence from ports / probes / host metadata
+internal/analysis      Model-agnostic AI analysis prompt (embedded prompt.md) from the latest scan, with
+                       MAC and name masking; the app only shows it, never sends it
 internal/inventory     Saved history: snapshots, network profiles, device identity, annotations,
                        finding reviews, comparisons (stdlib JSON, atomic writes, OS file lock)
 internal/netinfo       Interfaces, CIDR helpers, allowlist, default gateway (best-effort)
@@ -37,6 +39,7 @@ web/                   Embedded UI (index.html, style.css, app.js) via embed.FS
 7. `discover.EnrichLANIdentity` runs SSDP (known hosts) then SNMP `public` soft probe.
 8. `risk.Evaluate` builds findings: an open port alone is inferred and at most medium; a protocol answer makes a finding confirmed. `POST /api/scan/cancel` stops a run; what it saw is kept and flagged partial.
 9. `inventory.Store.Record` picks the network profile (gateway MAC + subnet), links hosts to devices, saves the snapshot and index, and applies retention. The UI reads devices, history, and comparisons from `/api/inventory`, `/api/devices/{id}`, `/api/history`, and `/api/changes`.
+10. **Analyze with AI** calls `GET /api/analysis-prompt`. `analysis.Build` fills the prompt with the profile's latest scan: devices seen, ports and probe evidence, findings with review state, tags, coverage (including whether the scan ran elevated, recorded at scan time), and changes since the previous scan. MACs (`maskMacs`) and names, tags, and notes (`maskNames`) are masked unless the request sets them to `0`. Masking also scrubs those values from banners, titles, and finding text. Device text stays inside a JSON block that the prompt tells the model to treat as untrusted data, and backticks are escaped so it cannot close the block. The UI shows the text with a risk notice, and copying or downloading it waits for the user to acknowledge that risk. Nothing is sent from the app.
 
 ## Linux launcher
 
