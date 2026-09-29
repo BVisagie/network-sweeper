@@ -42,6 +42,12 @@
       </a>
     </div>
   </header>
+  <div id="scan-strip" class="scan-strip" hidden>
+    <span class="scan-strip-pulse" aria-hidden="true"></span>
+    <p class="scan-strip-text"><span id="strip-phase" class="scan-strip-phase" aria-live="polite"></span> <span id="strip-detail" class="scan-strip-detail"></span></p>
+    <button type="button" id="stop-btn" class="ghost">Stop</button>
+    <div class="scan-strip-bar" id="strip-bar" role="progressbar" aria-label="Scan progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="progress-bar" class="scan-strip-fill"></div></div>
+  </div>
 
   <div id="app" class="shell">
     <div id="disconnected" class="banner is-error" role="alert" hidden>
@@ -71,12 +77,20 @@
 
     <main id="main" hidden>
       <section id="tab-devices" class="tab active" role="tabpanel" aria-labelledby="tabbtn-devices">
-        <div class="panel">
-          <div class="panel-head">
-            <h3>Scan</h3>
-            <button type="button" class="text-link" id="caps-link">What can this computer detect?</button>
+        <section class="panel scanbar" id="scanbar" aria-labelledby="scanbar-title">
+          <h2 id="scanbar-title" class="sr-only">Scan</h2>
+          <div class="scanbar-row">
+            <div class="scanbar-actions">
+              <button id="scan-btn" class="primary">Scan</button>
+              <button id="analyze-btn" class="ai-cta" type="button" hidden>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2.5l1.9 5.6 5.6 1.9-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.9L12 2.5zm6.5 11l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9.9-2.6z"/></svg>
+                <span>Analyze<span class="ai-cta-long"> with AI</span></span>
+              </button>
+            </div>
+            <p class="scanbar-summary"><span class="bar-label">Next scan</span> <span id="scan-summary"></span></p>
+            <button type="button" class="ghost disclosure" id="setup-toggle" aria-expanded="false" aria-controls="scan-setup">Scan setup</button>
           </div>
-          <div class="panel-body scan-body">
+          <div id="scan-setup" class="scan-setup" hidden>
             <fieldset class="scope">
               <legend class="context-label">Networks to scan</legend>
               <div id="scope-subnets" class="scope-list"><p class="empty">Loading interfaces…</p></div>
@@ -85,64 +99,70 @@
                 <input id="targets" type="text" spellcheck="false" autocomplete="off" placeholder="e.g. 192.168.1.0/24, 10.0.5.10/32" />
               </label>
             </fieldset>
-
-            <div class="scan-primary">
-              <div class="scan-actions">
-                <button id="scan-btn" class="primary large">Scan</button>
-                <button id="stop-btn" class="ghost" hidden>Stop</button>
-                <button id="analyze-btn" class="ai-cta" type="button" hidden>
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2.5l1.9 5.6 5.6 1.9-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.9L12 2.5zm6.5 11l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9.9-2.6z"/></svg>
-                  Analyze with AI
-                </button>
-              </div>
-              <label class="check deep-check" id="deep-label">
-                <input type="checkbox" id="deep" />
-                <span>
-                  <strong>Deep discovery</strong>
-                  <small class="help-inline">Also try ping (and ARP when elevated on Linux/macOS) for quieter devices</small>
-                  <small id="deep-hint" class="deep-capability" hidden></small>
-                </span>
-              </label>
-            </div>
-
+            <label class="check deep-check" id="deep-label">
+              <input type="checkbox" id="deep" />
+              <span>
+                <strong>Deep discovery</strong>
+                <small class="help-inline">Also try ping (and ARP when elevated on Linux/macOS) for quieter devices</small>
+                <small id="deep-hint" class="deep-capability" hidden></small>
+              </span>
+            </label>
+            <p class="setup-caps"><button type="button" class="text-link" id="caps-link">What can this computer detect?</button></p>
             <p id="scan-locked" class="muted small" hidden>Scan settings are locked while a scan runs. Stop it to change them.</p>
-            <p id="preview" class="preview" aria-live="polite"></p>
-            <p id="scan-status" class="status-line" aria-live="polite"></p>
-            <div id="progress" class="progress" hidden>
-              <ol id="phases" class="phases" aria-label="Scan phases"></ol>
-              <div class="progress-wrap"><div class="progress-bar" id="progress-bar" style="width:0%"></div></div>
-              <div id="live" class="live"></div>
-            </div>
-            <p id="scan-note" class="scan-callout" hidden></p>
+          </div>
+          <p id="preview" class="preview" aria-live="polite"></p>
+        </section>
+        <p id="scan-status" class="status-line scan-status" aria-live="polite"></p>
+        <p id="scan-note" class="scan-callout" hidden></p>
+
+        <div class="net-slot" data-net-slot="devices">
+          <div id="network-bar" class="network-bar" hidden>
+            <span class="bar-label" id="network-label">Network</span>
+            <label class="field compact profile-pick" id="profile-pick" hidden>
+              <span class="sr-only">Network to show</span>
+              <select id="profile-select"></select>
+            </label>
+            <span id="network-name" class="network-name"></span>
+            <span id="network-meta" class="network-meta"></span>
+            <details class="export-menu">
+              <summary>Export</summary>
+              <div class="export-body">
+                <button id="export-json" class="ghost compact" type="button">Latest scan (JSON)</button>
+                <button id="export-csv" class="ghost compact" type="button">Latest scan (CSV)</button>
+                <button id="export-inventory" class="ghost compact" type="button">Devices and notes (JSON)</button>
+              </div>
+            </details>
           </div>
         </div>
-
         <div id="inventory-banners"></div>
         <div id="summary" class="summary-strip" hidden></div>
 
-        <section class="panel hosts-panel">
-          <div class="panel-head">
-            <h3>Devices <span id="host-count" class="count-pill">0</span></h3>
-            <div class="head-actions">
-              <label class="field compact profile-pick" id="profile-pick" hidden>
-                <span class="sr-only">Network</span>
-                <select id="profile-select"></select>
-              </label>
-              <details class="export-menu">
-                <summary>Export</summary>
-                <div class="export-body">
-                  <button id="export-json" class="ghost compact" type="button">Latest scan (JSON)</button>
-                  <button id="export-csv" class="ghost compact" type="button">Latest scan (CSV)</button>
-                  <button id="export-inventory" class="ghost compact" type="button">Devices and notes (JSON)</button>
-                </div>
-              </details>
-            </div>
-          </div>
-          <div class="panel-body device-filters">
-            <label class="field grow compact">
+        <section class="panel hosts-panel" aria-labelledby="devices-title">
+          <div class="panel-head devices-head">
+            <h3 id="devices-title">Devices <span id="host-count" class="count-pill">0</span></h3>
+            <label class="field compact devices-search">
               <span class="sr-only">Search devices</span>
               <input id="host-filter" type="search" placeholder="Search IP, name, MAC, vendor, notes…" autocomplete="off" />
             </label>
+            <button type="button" class="ghost disclosure" id="filters-toggle" aria-expanded="false" aria-controls="device-filters">
+              Filters<span id="filter-count" class="count-pill" hidden></span>
+            </button>
+            <div class="sort-pick">
+              <label class="field compact">
+                <span class="sr-only">Sort devices by</span>
+                <select id="sort-select">
+                  <option value="ip">Address</option>
+                  <option value="name">Name</option>
+                  <option value="vendor">Vendor</option>
+                  <option value="services">Services</option>
+                  <option value="findings">Findings</option>
+                  <option value="seen">Last seen</option>
+                </select>
+              </label>
+              <button type="button" class="ghost sort-dir" id="sort-dir"></button>
+            </div>
+          </div>
+          <div id="device-filters" class="device-filters" hidden>
             <label class="field compact"><span>Service</span><select id="f-service"></select></label>
             <label class="field compact"><span>Vendor</span><select id="f-vendor"></select></label>
             <label class="field compact"><span>Tag</span><select id="f-tag"></select></label>
@@ -163,6 +183,7 @@
               </select>
             </label>
           </div>
+          <div id="filter-chips" class="filter-chips" hidden></div>
           <div id="hosts" class="hosts-body">
             <p class="empty">Run a scan to build your device list.</p>
           </div>
@@ -170,6 +191,7 @@
       </section>
 
       <section id="tab-changes" class="tab" role="tabpanel" hidden aria-labelledby="tabbtn-changes">
+        <div class="net-slot" data-net-slot="changes"></div>
         <div class="panel">
           <div class="panel-head">
             <h3>What changed</h3>
@@ -191,6 +213,7 @@
       </section>
 
       <section id="tab-findings" class="tab" role="tabpanel" hidden aria-labelledby="tabbtn-findings">
+        <div class="net-slot" data-net-slot="findings"></div>
         <div class="panel">
           <div class="panel-head">
             <h3>Findings <span id="finding-count" class="count-pill">0</span></h3>
