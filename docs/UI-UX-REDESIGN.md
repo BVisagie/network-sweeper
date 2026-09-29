@@ -1,6 +1,6 @@
 # Network Sweeper: muted desktop console redesign
 
-Status: stage 1 (Shell) is in review. Stages 2–4 have not started.
+Status: stage 1 (Shell) has merged, and stage 2 (Devices) is in review. Stages 3 and 4 have not started.
 
 This plan delivers the device workspace described in Release 1 of the roadmap (`docs/ROADMAP.md` on the `planning/network-sweeper-roadmap` branch). Once the last stage below has merged, fold what remains useful here into a UI section of `docs/ARCHITECTURE.md` and delete this file.
 
@@ -52,11 +52,11 @@ Stage 3 carries the most behaviour change and gets its own manual verification p
 - Put subnet selection, custom ranges, and capability explanations in an expandable **Scan setup** section. Expand initially when there is no inventory; collapse after a successful scan. Remember the user's last open/closed choice in `localStorage` through the existing `remembered`/`remember` helpers. Keep errors and authorization requirements visible even when collapsed.
 - Move scan progress out of the Devices tab into a single slim strip under the app bar that shows phase, device count, and Stop on every tab while scanning. Preserve partial-result, timeout, save-failure, and discovery-limit messaging; the scan note and status line stay on Devices.
 - Keep search always visible. Move the five secondary filters into a **Filters** disclosure with an active-filter count, removable filter chips, and Clear all. Remember the disclosure state like Scan setup.
-- Place the network profile selector consistently above inventory and changes. Clearly distinguish the saved profile being viewed from the ranges selected for the next scan.
+- Place the network profile selector consistently above inventory and changes. Clearly distinguish the saved profile being viewed from the ranges selected for the next scan. (Built as one network bar that moves above Devices, Changes and Findings. It also holds Export, and flags a scan more than a day old in place of the stale-scan banner.)
 - Adapt the inventory to its **available content width**, including when the inspector is open. Use a CSS container query on the table's wrapper rather than window-width media queries or a `ResizeObserver`, so opening the inspector reflows the table with no JavaScript:
   - **960px and wider:** six columns—address, name, vendor, services, findings, last seen.
-  - **640–959px:** four columns—device identity, services, findings, last seen. Combine name/address/vendor within identity.
-  - **Below 640px:** compact stacked rows as a fallback.
+  - **600–959px:** four columns—device identity, services, findings, last seen. Combine name/address/vendor within identity. The lower bound is the panel width a 640px window leaves after its gutters, so a 640px window gets four columns.
+  - **Below 600px:** compact stacked rows as a fallback.
 - Provide a sort selector in compact layouts so all existing sort options remain accessible, including name and vendor once they have no header of their own. The selector drives the same `state.sort` as the header buttons, and the header's `aria-sort` reflects it in every layout. Preserve filters, sorting, selection, and scroll position across inspection and data refresh.
 - Make device names explicit keyboard-accessible detail actions; retain row selection and arrow-key navigation. Mark the device open in the inspector with `aria-selected` on its row and keep that mark across re-renders.
 

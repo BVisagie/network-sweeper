@@ -1,6 +1,8 @@
 (() => {
   const TOKEN = window.__NS_TOKEN__;
   const CONSENT_KEY = "ns-consent-ok";
+  const SETUP_KEY = "ns-scan-setup";
+  const FILTERS_KEY = "ns-device-filters";
   const STALE_MS = 24 * 60 * 60 * 1000;
   const $ = (id) => document.getElementById(id);
 
@@ -208,13 +210,16 @@
     return lines;
   }
 
-  function portPill(op) {
+  // portPill shows port/service, or just the port number when short.
+  function portPill(op, short = false) {
     const extra = portEnrichLines(op);
     const help = portHelpText(op.port, op.service) + (extra.length ? "\n" + extra.join("\n") : "");
     const label = `${op.port}/${op.service || "service"}`;
     const tip = tipAttr(help);
     const confirmed = op.protocol ? " confirmed" : "";
-    return `<span class="port-pill${confirmed}" tabindex="0" data-tip="${tip}" aria-label="${escapeHtml(label)}: ${tip}"><span class="port-pill-label">${escapeHtml(label)}</span></span>`;
+    return `<span class="port-pill${confirmed}" tabindex="0" data-tip="${tip}" aria-label="${escapeHtml(label)}: ${tip}"><span class="port-pill-label">${escapeHtml(
+      short ? String(op.port) : label
+    )}</span></span>`;
   }
 
   function identityHint(h, ports) {
@@ -277,6 +282,7 @@
     findingSev: "all",
     currentDeviceId: "",
     justScanned: false,
+    stopping: false,
   };
 
   // ---------- API ----------
@@ -367,6 +373,9 @@
       panel.classList.toggle("active", on);
       panel.hidden = !on;
     });
+    // One network bar, shown above whichever inventory view is open.
+    const slot = document.querySelector(`[data-net-slot="${id}"]`);
+    if (slot && !slot.contains($("network-bar"))) slot.appendChild($("network-bar"));
     if (focus) document.getElementById("tabbtn-" + id)?.focus();
     if (id === "changes") loadChanges();
     if (id === "analyze") {
@@ -424,12 +433,16 @@
     $("custom-optin").checked = !!state.session.customOptIn;
     $("updates-optin").checked = !!state.session.updatesOptIn;
     await refreshAll();
+    // Scan setup starts open until there is an inventory; after that it
+    // opens the way the user last left it.
+    setSetupOpen(!devices().length || remembered(SETUP_KEY) === "open", false);
     updatePreview();
     // Resume a scan that was running when the page loaded.
     try {
       const st = await api("/api/scan/status");
       if (st.running && st.scan) {
         state.scanId = st.scan.id;
+        $("strip-phase").textContent = "Scanning…";
         setScanning(true);
         pollStatus();
       }
@@ -533,18 +546,55 @@
   }
 
   let previewTimer = null;
+  let previewSeq = 0;
   function updatePreview() {
+    // The last plan no longer describes the selection. Drop it (and any
+    // preview still in flight) so the summary follows the selection itself
+    // until the new preview arrives.
+    state.preview = null;
+    previewSeq++;
+    renderScanSummary();
     clearTimeout(previewTimer);
     previewTimer = setTimeout(runPreview, 200);
   }
 
+  // renderScanSummary fills the toolbar's one-line account of the next scan:
+  // its ranges, Deep discovery, and (once previewed) how many addresses.
+  function renderScanSummary() {
+    const plan = state.preview?.ok ? state.preview.plan : null;
+    const ranges = plan ? plan.ranges || [] : scanTargets();
+    const deep = $("deep").checked;
+    const unelevated = deep && state.session && !state.session.elevated && state.plat?.os !== "windows";
+    const deepText = deep ? (unelevated ? "on (not elevated)" : "on") : "off";
+    const parts = [
+      ranges.length ? `<span class="mono">${escapeHtml(ranges.join(", "))}</span>` : "no networks selected",
+      `<span class="wide-only">Deep discovery</span><span class="narrow-only">Deep</span> ${deepText}`,
+    ];
+    if (plan) parts.push(escapeHtml(plural(plan.addresses, "address", "addresses")));
+    const el = $("scan-summary");
+    el.innerHTML = parts.join(" · ");
+    el.parentElement.title = `Next scan: ${ranges.join(", ") || "no networks selected"} · Deep discovery ${deepText}${
+      plan ? " · " + plural(plan.addresses, "address", "addresses") : ""
+    }`;
+  }
+
+  function setSetupOpen(open, save) {
+    $("scan-setup").hidden = !open;
+    $("setup-toggle").setAttribute("aria-expanded", String(open));
+    $("scanbar").classList.toggle("is-open", open);
+    if (save) remember(SETUP_KEY, open ? "open" : "closed");
+  }
+  $("setup-toggle").addEventListener("click", () => setSetupOpen($("scan-setup").hidden, true));
+
   async function runPreview() {
+    const mine = ++previewSeq;
     const el = $("preview");
     const targets = scanTargets();
     if (!targets.length) {
       state.preview = null;
       el.className = "preview is-warn";
       el.textContent = "Select at least one network, or enter a range.";
+      renderScanSummary();
       syncScanButton();
       return;
     }
@@ -554,6 +604,7 @@
         deep: $("deep").checked,
         customOptIn: $("custom-optin").checked,
       });
+      if (mine !== previewSeq) return; // the selection changed while this was in flight
       state.preview = res;
       const p = res.plan || {};
       if (res.ok) {
@@ -573,10 +624,12 @@
         });
       }
     } catch (e) {
+      if (mine !== previewSeq) return;
       state.preview = null;
       el.className = "preview is-warn";
       el.textContent = e.message;
     }
+    renderScanSummary();
     syncScanButton();
   }
 
@@ -594,8 +647,8 @@
   // ---------- scanning ----------
 
   function setScanning(running) {
-    $("stop-btn").hidden = !running;
-    $("progress").hidden = !running;
+    $("scan-strip").hidden = !running;
+    state.stopping = false;
     // A scan's ranges and options are fixed once it starts, and deleting
     // history under it would lose it: lock those controls until it ends.
     // (Disabling the fieldset keeps each too-large subnet's own disabled flag.)
@@ -605,18 +658,22 @@
     $("data-locked").hidden = !running;
     if (running) {
       state.lastPct = 0;
-      $("progress-bar").style.width = "0%";
-      $("live").innerHTML = "";
-      $("phases").innerHTML = "";
+      setStripProgress(0);
+      $("strip-detail").textContent = "";
     }
     syncScanButton();
   }
 
+  function setStripProgress(pct) {
+    $("progress-bar").style.width = pct + "%";
+    $("strip-bar").setAttribute("aria-valuenow", String(pct));
+  }
+
   async function startScan(targets, label) {
     const status = $("scan-status");
-    status.textContent = label || "Starting scan…";
-    status.classList.add("is-busy");
+    status.textContent = "";
     setScanNote("");
+    $("strip-phase").textContent = label || "Starting scan…";
     try {
       const res = await post("/api/scan", {
         targets,
@@ -627,7 +684,6 @@
       setScanning(true);
       pollStatus();
     } catch (e) {
-      status.classList.remove("is-busy");
       status.textContent = "Could not start: " + e.message;
       setScanning(false);
     }
@@ -638,9 +694,10 @@
   $("stop-btn").addEventListener("click", async () => {
     try {
       await post("/api/scan/cancel", { id: state.scanId });
-      $("scan-status").textContent = "Stopping… results so far are kept.";
+      state.stopping = true;
+      $("strip-phase").textContent = "Stopping… results so far are kept.";
     } catch (e) {
-      $("scan-status").textContent = e.message;
+      $("strip-detail").textContent = e.message;
     }
   });
 
@@ -651,24 +708,20 @@
     return ph.from + (ph.to - ph.from) * frac;
   }
 
+  // renderProgress updates the strip under the app bar. Only the phase name
+  // is announced; the counters change too often to read out.
   function renderProgress(run) {
     const idx = PHASES.findIndex((p) => p.key === run.phase);
-    $("phases").innerHTML = PHASES.map((p, i) => {
-      const cls = i < idx || run.phase === "done" ? "done" : i === idx ? "current" : "";
-      let count = "";
-      if (i === idx && run.total > 0) count = ` <span class="phase-count">${fmtNumber(run.done)}/${fmtNumber(run.total)}</span>`;
-      return `<li class="${cls}"${i === idx ? ' aria-current="step"' : ""}>${escapeHtml(p.label)}${count}</li>`;
-    }).join("");
+    const ph = PHASES[idx];
     // Never move the bar backwards, even if a phase reports fewer counts.
     state.lastPct = Math.max(state.lastPct, phasePercent(run));
-    $("progress-bar").style.width = Math.round(state.lastPct) + "%";
-    const found = run.found || [];
-    $("live").innerHTML = found.length
-      ? `<p class="context-label">Found so far (${found.length})</p><div class="chip-row">${found
-          .slice(-60)
-          .map((f) => `<span class="chip soft" title="${escapeHtml(f.via)}"><span class="mono">${escapeHtml(f.ip)}</span></span>`)
-          .join("")}${found.length > 60 ? `<span class="chip soft">+${found.length - 60} earlier</span>` : ""}</div>`
-      : "";
+    setStripProgress(Math.round(state.lastPct));
+    if (!state.stopping) $("strip-phase").textContent = ph ? `Scanning · ${ph.label}` : "Starting scan…";
+    const detail = [];
+    if (ph) detail.push(`step ${idx + 1} of ${PHASES.length}`);
+    if (ph && run.total > 0) detail.push(`${fmtNumber(run.done)}/${fmtNumber(run.total)}`);
+    detail.push(plural((run.found || []).length, "device") + " found");
+    $("strip-detail").textContent = detail.join(" · ");
   }
 
   function pollStatus() {
@@ -684,16 +737,12 @@
       const run = st.scan;
       if (!run || (state.scanId && run.id !== state.scanId)) return;
       if (st.running) {
-        status.classList.add("is-busy");
-        const ph = PHASES.find((p) => p.key === run.phase);
-        status.textContent = `Scanning — ${ph ? ph.label.toLowerCase() : "starting"}${run.found?.length ? ` · ${plural(run.found.length, "device")} found` : ""}`;
         renderProgress(run);
         return;
       }
       clearInterval(state.polling);
       state.polling = null;
       setScanning(false);
-      status.classList.remove("is-busy");
       const ended = {
         completed: "Scan finished.",
         canceled: "Scan stopped early. Results so far were kept and are marked partial.",
@@ -702,6 +751,7 @@
       };
       status.textContent = (ended[run.state] || "Scan finished.") + (run.finishedAt ? ` (${fmtTime(run.finishedAt)})` : "");
       setScanNote(run.saveError ? "These results are shown but were not saved: " + run.saveError : "");
+      if (run.state === "completed") setSetupOpen(false, false);
       state.justScanned = true; // point Changes at the newest two scans
       $("profile-select").value = ""; // show the network just scanned
       await refreshAll();
@@ -738,13 +788,34 @@
     syncScanButton();
   }
 
+  // renderProfiles fills the network bar: the saved network being shown
+  // (a picker once there are several), its subnet, and its last scan.
   function renderProfiles() {
     const profiles = state.inv.profiles || [];
-    const sel = $("profile-select");
+    const cur = profiles.find((p) => p.id === state.inv.profileId);
+    $("network-bar").hidden = !cur;
     $("profile-pick").hidden = profiles.length < 2;
-    sel.innerHTML = profiles
+    $("network-name").hidden = profiles.length >= 2;
+    $("network-name").textContent = cur?.name || "";
+    $("profile-select").innerHTML = profiles
       .map((p) => `<option value="${escapeHtml(p.id)}" ${p.id === state.inv.profileId ? "selected" : ""}>${escapeHtml(p.name)}</option>`)
       .join("");
+    const latest = state.inv.latestScan;
+    const meta = [];
+    if (cur?.subnet && !cur.name.includes(cur.subnet)) meta.push(`<span class="mono">${escapeHtml(cur.subnet)}</span>`);
+    if (latest) {
+      // A day-old scan is flagged here rather than in a banner of its own.
+      const stale = Date.now() - new Date(latest.finishedAt).getTime() > STALE_MS;
+      meta.push(
+        stale
+          ? `<span class="is-stale" title="The latest scan is from ${escapeHtml(fmtTime(latest.finishedAt))}. Scan again for a current picture.">last scan ${escapeHtml(
+              ago(latest.finishedAt)
+            )}, may be out of date</span>`
+          : `<span title="${escapeHtml(fmtTime(latest.finishedAt))}">last scan ${escapeHtml(ago(latest.finishedAt))}</span>`
+      );
+    }
+    $("network-meta").innerHTML = meta.join(" · ");
+    $("network-meta").title = $("network-meta").textContent;
   }
 
   $("profile-select").addEventListener("change", () => refreshAll());
@@ -802,7 +873,6 @@
       ${sev.critical ? `<span class="sum-chip sev-critical"><strong>${sev.critical}</strong> critical</span>` : ""}
       ${sev.high ? `<span class="sum-chip sev-high"><strong>${sev.high}</strong> high</span>` : ""}
       ${sev.medium ? `<span class="sum-chip sev-medium"><strong>${sev.medium}</strong> medium</span>` : ""}
-      ${latest ? `<span class="sum-chip soft" title="${escapeHtml(fmtTime(latest.finishedAt))}">Last scan ${escapeHtml(ago(latest.finishedAt))}</span>` : ""}
     `;
   }
 
@@ -812,17 +882,12 @@
     if (st.mode === "unavailable") out.push({ cls: "is-error", text: st.reason });
     if (st.lastError) out.push({ cls: "is-error", text: "Saving failed: " + st.lastError + " Results stay visible and can be exported." });
     const latest = state.inv.latestScan;
-    if (latest) {
-      if (latest.partial) {
-        const how = latest.state === "timed_out" ? "hit the time limit" : latest.state === "failed" ? "failed" : "was stopped early";
-        out.push({
-          cls: "is-warn",
-          text: `The latest scan ${how}, so its results are partial. Devices marked “not seen” may simply not have been checked.`,
-        });
-      }
-      if (Date.now() - new Date(latest.finishedAt).getTime() > STALE_MS) {
-        out.push({ cls: "is-warn", text: `The latest scan is from ${fmtTime(latest.finishedAt)}. Scan again for a current picture.` });
-      }
+    if (latest?.partial) {
+      const how = latest.state === "timed_out" ? "hit the time limit" : latest.state === "failed" ? "failed" : "was stopped early";
+      out.push({
+        cls: "is-warn",
+        text: `The latest scan ${how}, so its results are partial. Devices marked “not seen” may simply not have been checked.`,
+      });
     }
     $("inventory-banners").innerHTML = out.map((b) => `<div class="banner ${b.cls}">${escapeHtml(b.text)}</div>`).join("");
   }
@@ -885,14 +950,31 @@
     seen: (d) => -new Date(d.lastSeen).getTime(),
   };
 
+  // Six columns on wide tables. Narrower, one Device column stands for
+  // address, name and vendor together, and CSS shows it instead of those
+  // three (container queries on .hosts-panel).
+  const IDENTITY_KEYS = ["ip", "name", "vendor"];
   const COLUMNS = [
-    { key: "ip", label: "Address" },
-    { key: "name", label: "Name" },
-    { key: "vendor", label: "Vendor" },
-    { key: "services", label: "Services" },
-    { key: "findings", label: "Findings" },
-    { key: "seen", label: "Last seen" },
+    { key: "ip", label: "Address", cls: "c-ip" },
+    { key: "name", label: "Name", cls: "c-name" },
+    { key: "vendor", label: "Vendor", cls: "c-vendor" },
+    { key: "ip", label: "Device", cls: "c-device", identity: true },
+    { key: "services", label: "Services", cls: "c-services" },
+    { key: "findings", label: "Findings", cls: "c-findings" },
+    { key: "seen", label: "Last seen", cls: "c-seen" },
   ];
+
+  const FILTERS = [
+    ["f-service", "Service"],
+    ["f-vendor", "Vendor"],
+    ["f-tag", "Tag"],
+    ["f-seen", "Seen"],
+    ["f-findings", "Findings"],
+  ];
+
+  // Each device's name is rendered twice (six-column and Device layouts);
+  // only one is ever visible.
+  const visibleIn = (root, selector) => [...(root?.querySelectorAll(selector) || [])].find((el) => el.offsetParent !== null);
 
   function renderDevices() {
     const all = devices();
@@ -905,11 +987,15 @@
     });
     const filtered = list.length !== all.length;
     $("host-count").textContent = filtered ? `${list.length} / ${all.length}` : String(all.length);
+    renderFilterChips();
+    renderSortControls();
 
     const focusKey = document.activeElement?.dataset?.focusKey;
+    // Search, Filters and sort have nothing to act on until there are devices.
+    document.querySelector(".hosts-panel").classList.toggle("is-empty", !all.length);
     if (!all.length) {
       $("hosts").innerHTML = `<div class="empty-coach">
-        <p class="empty">No devices yet. Choose networks above and press Scan.</p>
+        <p class="empty">No devices yet. Choose networks in Scan setup and press Scan.</p>
         <ul class="notes">
           <li>Guest Wi‑Fi or AP/client isolation can hide other devices.</li>
           <li>Try <strong>Deep discovery</strong> (and elevate with sudo / Run as administrator).</li>
@@ -921,24 +1007,26 @@
     if (!list.length) {
       $("hosts").innerHTML = `<div class="empty-coach"><p class="empty">No devices match these filters.</p>
         <button type="button" class="ghost compact" id="clear-filters">Clear filters</button></div>`;
-      $("clear-filters").addEventListener("click", clearFilters);
       return;
     }
 
     const head = COLUMNS.map((c) => {
-      const active = state.sort.key === c.key;
+      const active = c.identity ? IDENTITY_KEYS.includes(state.sort.key) : state.sort.key === c.key;
       const aria = active ? (state.sort.dir === 1 ? "ascending" : "descending") : "none";
       const arrow = active ? (state.sort.dir === 1 ? "▲" : "▼") : "";
-      return `<th aria-sort="${aria}" class="col-${c.key}"><button type="button" class="sort-btn" data-sort="${c.key}" data-focus-key="sort-${c.key}">${escapeHtml(
-        c.label
-      )}<span class="sort-arrow" aria-hidden="true">${arrow}</span></button></th>`;
+      const by = c.identity && active && state.sort.key !== "ip" ? ` <span class="sort-by">by ${state.sort.key}</span>` : "";
+      return `<th aria-sort="${aria}" class="${c.cls}"><button type="button" class="sort-btn" data-sort="${c.key}"${
+        c.identity ? " data-identity" : ""
+      } data-focus-key="sort-${c.cls}">${escapeHtml(c.label)}${by}<span class="sort-arrow" aria-hidden="true">${arrow}</span></button></th>`;
     }).join("");
 
     const rows = list
       .map((d) => {
         const h = d.last?.host || {};
         const ports = d.last?.ports || [];
+        const ip = escapeHtml(devIP(d));
         const name = devName(d);
+        const vendor = escapeHtml(humanizeText(h.vendor || ""));
         const open = openFindings(d);
         const worst = worstSeverity(open);
         const badges = [];
@@ -947,75 +1035,152 @@
         if (h.isSelf) badges.push(`<span class="tag-pill self">This device</span>`);
         if (h.isGateway) badges.push(`<span class="tag-pill gw">Gateway</span>`);
         if (d.uncertain?.length) badges.push(`<span class="tag-pill guess" title="${escapeHtml(d.uncertain.join(" "))}">Identity uncertain</span>`);
+        const badgeHtml = badges.join("");
         const tags = (d.tags || []).map((t) => `<span class="tag-pill user">${escapeHtml(t)}</span>`).join("");
         const findings = (d.findings || []).length
           ? worst
             ? `<span class="sev ${escapeHtml(worst)}">${escapeHtml(worst)}</span> <span class="muted">${open.length} open</span>`
             : `<span class="muted">${(d.findings || []).length} acknowledged</span>`
           : `<span class="muted">—</span>`;
-        return `<tr tabindex="0" data-device="${escapeHtml(d.id)}" data-focus-key="row-${escapeHtml(d.id)}" aria-label="${escapeHtml(
-          `${devIP(d)} ${name}`
-        )}, open details">
-          <td class="col-ip"><span class="mono ip">${escapeHtml(devIP(d))}</span><div class="badge-row">${badges.join("")}</div></td>
-          <td class="col-name"><div class="name-primary${name ? "" : " name-empty"}" title="${escapeHtml(name)}">${escapeHtml(name || "Unknown")}</div>${
-            tags ? `<div class="badge-row">${tags}</div>` : ""
-          }</td>
-          <td class="col-vendor"><span class="clip" title="${escapeHtml(h.vendor || "")}">${escapeHtml(humanizeText(h.vendor || "—"))}</span></td>
-          <td class="col-services">${
-            ports.length
-              ? `<div class="port-list">${ports.slice(0, 4).map(portPill).join("")}${ports.length > 4 ? `<span class="port-more">+${ports.length - 4}</span>` : ""}</div>`
-              : `<span class="muted">—</span>`
-          }</td>
-          <td class="col-findings">${findings}</td>
-          <td class="col-seen"><span title="${escapeHtml(fmtTime(d.lastSeen))}">${escapeHtml(ago(d.lastSeen))}</span></td>
+        const link = `<button type="button" class="device-link${name ? "" : " name-empty"}" data-open="${escapeHtml(d.id)}" data-focus-key="dev-${escapeHtml(
+          d.id
+        )}" title="${escapeHtml(name)}" aria-label="${escapeHtml(`${name || "Unknown device"}, ${devIP(d)}: open details`)}">${escapeHtml(name || "Unknown")}</button>`;
+        const shown = ports.slice(0, 4);
+        const more = ports.length > 4 ? `<span class="port-more">+${ports.length - 4}</span>` : "";
+        const services = ports.length
+          ? `<div class="port-list svc-full">${shown.map((p) => portPill(p)).join("")}${more}</div><div class="port-list svc-short">${shown
+              .map((p) => portPill(p, true))
+              .join("")}${more}</div>`
+          : `<span class="muted">—</span>`;
+        return `<tr data-device="${escapeHtml(d.id)}"${d.id === state.currentDeviceId ? ' aria-selected="true"' : ""}>
+          <td class="c-ip"><span class="mono ip">${ip}</span>${badgeHtml ? `<div class="badge-row">${badgeHtml}</div>` : ""}</td>
+          <td class="c-name">${link}${tags ? `<div class="badge-row">${tags}</div>` : ""}</td>
+          <td class="c-vendor"><span class="clip" title="${vendor}">${vendor || "—"}</span></td>
+          <td class="c-device"><div class="ident-top">${link}${badgeHtml}${tags}</div><div class="ident-sub"><span class="mono">${ip}</span>${
+            vendor ? ` · <span title="${vendor}">${vendor}</span>` : ""
+          }</div></td>
+          <td class="c-services">${services}</td>
+          <td class="c-findings">${findings}</td>
+          <td class="c-seen"><span title="${escapeHtml(fmtTime(d.lastSeen))}">${escapeHtml(ago(d.lastSeen))}</span></td>
         </tr>`;
       })
       .join("");
 
     $("hosts").innerHTML = `<div class="table-wrap"><table class="hosts-table devices-table">
-      <caption class="sr-only">Devices. Select a row to open its details.</caption>
+      <caption class="sr-only">Devices. Choose a device's name to open its details.</caption>
       <thead><tr>${head}</tr></thead>
       <tbody>${rows}</tbody>
     </table></div>`;
-
-    $("hosts").querySelectorAll("[data-sort]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const key = btn.dataset.sort;
-        state.sort = { key, dir: state.sort.key === key ? -state.sort.dir : 1 };
-        renderDevices();
-      });
-    });
-    $("hosts").querySelectorAll("tr[data-device]").forEach((tr) => {
-      tr.addEventListener("click", (e) => {
-        if (e.target.closest("button, a")) return;
-        openDevice(tr.dataset.device);
-      });
-      tr.addEventListener("keydown", (e) => {
-        if (e.target !== tr) return;
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          openDevice(tr.dataset.device);
-        } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-          e.preventDefault();
-          const sib = e.key === "ArrowDown" ? tr.nextElementSibling : tr.previousElementSibling;
-          sib?.focus();
-        }
-      });
-    });
     bindFloatTips($("hosts"));
-    if (focusKey) document.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`)?.focus();
+    if (focusKey) visibleIn($("hosts"), `[data-focus-key="${CSS.escape(focusKey)}"]`)?.focus();
   }
+
+  // Sorting, row clicks, and moving between devices with the arrow keys are
+  // bound once on the table's container, which is re-rendered in place.
+  $("hosts").addEventListener("click", (e) => {
+    const sort = e.target.closest("[data-sort]");
+    if (sort) {
+      const key = sort.dataset.sort;
+      const same = "identity" in sort.dataset ? IDENTITY_KEYS.includes(state.sort.key) : state.sort.key === key;
+      state.sort = same ? { key: state.sort.key, dir: -state.sort.dir } : { key, dir: 1 };
+      renderDevices();
+      return;
+    }
+    if (e.target.closest("#clear-filters")) return clearFilters();
+    const link = e.target.closest("[data-open]");
+    if (link) return openDevice(link.dataset.open);
+    const tr = e.target.closest("tr[data-device]");
+    if (tr && !e.target.closest("button, a")) openDevice(tr.dataset.device);
+  });
+
+  $("hosts").addEventListener("keydown", (e) => {
+    if (!e.target.matches(".device-link") || (e.key !== "ArrowDown" && e.key !== "ArrowUp")) return;
+    e.preventDefault();
+    let tr = e.target.closest("tr");
+    let next = null;
+    while (!next && (tr = e.key === "ArrowDown" ? tr.nextElementSibling : tr.previousElementSibling)) next = visibleIn(tr, ".device-link");
+    next?.focus();
+  });
+
+  // markOpenRow flags the device whose details are open, without a re-render.
+  function markOpenRow() {
+    $("hosts")
+      .querySelectorAll("tr[data-device]")
+      .forEach((tr) => {
+        if (tr.dataset.device === state.currentDeviceId) tr.setAttribute("aria-selected", "true");
+        else tr.removeAttribute("aria-selected");
+      });
+  }
+
+  function renderSortControls() {
+    const asc = state.sort.dir === 1;
+    $("sort-select").value = state.sort.key;
+    $("sort-dir").textContent = asc ? "▲" : "▼";
+    $("sort-dir").setAttribute("aria-label", `Reverse the order (now ${asc ? "ascending" : "descending"})`);
+    $("sort-dir").title = asc ? "Ascending: select to reverse" : "Descending: select to reverse";
+  }
+
+  $("sort-select").addEventListener("change", () => {
+    state.sort = { key: $("sort-select").value, dir: 1 };
+    renderDevices();
+  });
+  $("sort-dir").addEventListener("click", () => {
+    state.sort = { ...state.sort, dir: -state.sort.dir };
+    renderDevices();
+  });
+
+  // renderFilterChips shows each active secondary filter as a removable chip,
+  // so they stay visible while the Filters panel is closed.
+  function renderFilterChips() {
+    const active = FILTERS.filter(([id]) => $(id).value);
+    $("filter-count").hidden = !active.length;
+    $("filter-count").textContent = String(active.length);
+    $("filters-toggle").setAttribute("aria-label", active.length ? `Filters, ${active.length} active` : "Filters");
+    $("filter-chips").hidden = !active.length;
+    $("filter-chips").innerHTML = active.length
+      ? active
+          .map(([id, label]) => {
+            const sel = $(id);
+            const text = sel.options[sel.selectedIndex]?.text || sel.value;
+            return `<button type="button" class="filter-token" data-clear="${id}" aria-label="Remove filter ${escapeHtml(label)}: ${escapeHtml(
+              text
+            )}">${escapeHtml(label)}: <strong>${escapeHtml(text)}</strong><span class="filter-x" aria-hidden="true">×</span></button>`;
+          })
+          .join("") + `<button type="button" class="ghost filters-clear" id="filters-clear">Clear all</button>`
+      : "";
+  }
+
+  $("filter-chips").addEventListener("click", (e) => {
+    const chip = e.target.closest("[data-clear]");
+    if (chip) {
+      const next = chip.nextElementSibling?.dataset.clear;
+      $(chip.dataset.clear).value = "";
+      renderDevices();
+      ($("filter-chips").querySelector(next ? `[data-clear="${next}"]` : "[data-clear]") || $("filters-toggle")).focus();
+    } else if (e.target.closest("#filters-clear")) {
+      for (const [id] of FILTERS) $(id).value = "";
+      renderDevices();
+      $("filters-toggle").focus();
+    }
+  });
+
+  function setFiltersOpen(open, save) {
+    $("device-filters").hidden = !open;
+    $("filters-toggle").setAttribute("aria-expanded", String(open));
+    if (save) remember(FILTERS_KEY, open ? "open" : "closed");
+  }
+  $("filters-toggle").addEventListener("click", () => setFiltersOpen($("device-filters").hidden, true));
+  setFiltersOpen(remembered(FILTERS_KEY) === "open", false);
 
   function clearFilters() {
     $("host-filter").value = "";
-    for (const id of ["f-service", "f-vendor", "f-tag", "f-seen", "f-findings"]) $(id).value = "";
+    for (const [id] of FILTERS) $(id).value = "";
     renderDevices();
     $("host-filter").focus();
   }
 
-  for (const id of ["host-filter", "f-service", "f-vendor", "f-tag", "f-seen", "f-findings"]) {
-    $(id).addEventListener(id === "host-filter" ? "input" : "change", () => renderDevices());
-  }
+  $("host-filter").addEventListener("input", () => renderDevices());
+  for (const [id] of FILTERS) $(id).addEventListener("change", () => renderDevices());
 
   // ---------- device detail ----------
 
@@ -1027,6 +1192,7 @@
       return;
     }
     state.currentDeviceId = id;
+    markOpenRow();
     const h = d.last?.host || {};
     const ports = d.last?.ports || [];
     const name = devName(d);
@@ -2257,6 +2423,7 @@
     document.body.classList.remove("modal-open");
     $("modal-body").innerHTML = "";
     state.currentDeviceId = "";
+    markOpenRow();
     hideFloatTip();
     if (modalReturnFocus && document.contains(modalReturnFocus)) modalReturnFocus.focus();
     modalReturnFocus = null;
