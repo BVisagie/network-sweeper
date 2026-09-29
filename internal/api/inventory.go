@@ -3,12 +3,14 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"runtime"
 	"sort"
 
 	"github.com/BVisagie/network-sweeper/internal/analysis"
+	"github.com/BVisagie/network-sweeper/internal/assistant"
 	"github.com/BVisagie/network-sweeper/internal/inventory"
 	"github.com/BVisagie/network-sweeper/internal/risk"
 	"github.com/BVisagie/network-sweeper/internal/version"
@@ -265,4 +267,32 @@ func (s *Server) handleAnalysisPrompt(w http.ResponseWriter, r *http.Request) {
 		MaskNames: q.Get("maskNames") != "0",
 	})
 	writeJSON(w, map[string]any{"prompt": text, "stats": stats})
+}
+
+// handleAssistant reports which AI backends this computer can use.
+func (s *Server) handleAssistant(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, map[string]any{"backends": s.Assistant.Statuses(r.Context(), r.URL.Query().Get("localUrl"))})
+}
+
+// maxAskBody fits the prompt plus a long conversation.
+const maxAskBody = 1 << 20
+
+// handleAssistantAsk sends one conversation turn to the chosen backend. The
+// request's context stops the AI when the page aborts the request.
+func (s *Server) handleAssistantAsk(w http.ResponseWriter, r *http.Request) {
+	var req assistant.Request
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxAskBody)).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	reply, err := s.Assistant.Ask(r.Context(), req)
+	if errors.Is(err, assistant.ErrBusy) {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, map[string]any{"reply": reply})
 }

@@ -289,6 +289,7 @@
         headers: { "X-NetworkSweeper-Token": TOKEN, "Content-Type": "application/json", ...(opts.headers || {}) },
       });
     } catch (e) {
+      if (e.name === "AbortError") throw e; // stopped on purpose
       setDisconnected(true);
       throw new Error("Network Sweeper is not reachable.");
     }
@@ -1556,13 +1557,33 @@
 
   // ---------- AI analysis ----------
 
-  // Shows a prompt, for any AI model, built from the latest scan. Nothing is
-  // sent from here: the user reads the risk notice, then copies or saves it.
+  const AI_BACKEND_KEY = "ns-ai-backend";
+  const AI_LOCAL_KEY = "ns-ai-local-url";
+
+  function remembered(key, fallback = "") {
+    try {
+      return localStorage.getItem(key) || fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  function remember(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+      // per-viewer convenience only
+    }
+  }
+
+  // Shows a prompt, for any AI model, built from the latest scan. The user
+  // reads the risk notice, then copies it, or sends it to an AI on this
+  // computer (the Claude or Codex CLI with tools off, or a local model server).
   function openAnalysis() {
     const latest = state.inv?.latestScan;
     if (!latest) return;
     const html = `
-      <p class="banner is-warn">This prompt describes your network: its devices, open services, software versions, and possible weak spots. AI services may keep what you paste, log it, or train on it. Network Sweeper sends nothing itself. Masking hides MAC addresses, names, tags, and notes, but IP addresses, vendors, and services stay. A model on your own computer, or a provider you trust, is safest. Sharing it is at your own risk.</p>
+      <p class="banner is-warn">This prompt describes your network: its devices, open services, software versions, and possible weak spots. AI services may keep what you share, log it, or train on it. Network Sweeper sends nothing itself: pasting it into a chat, or asking the Claude or Codex CLI below, shares it with that provider under your account, while a local model server keeps it on this computer. Masking hides MAC addresses, names, tags, and notes, but IP addresses, vendors, and services stay. A model on your own computer, or a provider you trust, is safest. Sharing it is at your own risk.</p>
       <section class="detail-section ai-analysis">
         <label class="check"><input type="checkbox" id="ai-ack" /><span>I understand the risk of sharing this.</span></label>
         <div class="ai-masks">
@@ -1572,11 +1593,29 @@
         <label class="field"><span>Prompt <small class="muted">(unlocks once you tick the box above; you can edit it, and changing a mask rebuilds it)</small></span>
           <textarea id="ai-prompt" class="ai-prompt" rows="14" spellcheck="false" disabled>Building the prompt…</textarea></label>
         <p id="ai-stats" class="muted small"></p>
-        <p class="help">Paste it into any capable AI chat. The model will probably ask you a few questions about your network first; answering them gets you better advice. Take care what you share in those answers too.</p>
+        <p class="help">Paste it into any capable AI chat, or ask an AI on this computer below. The model will probably ask you a few questions about your network first; answering them gets you better advice. Take care what you share in those answers too.</p>
         <div class="form-actions">
           <button type="button" class="primary" id="ai-copy" disabled>Copy prompt</button>
           <button type="button" class="ghost" id="ai-download" disabled>Download .md</button>
           <span id="ai-status" class="status-line" aria-live="polite"></span>
+        </div>
+      </section>
+      <section class="detail-section ai-analysis">
+        <h3>Ask an AI on this computer</h3>
+        <fieldset class="ai-backends" id="ai-backends"><legend class="sr-only">AI to ask</legend><p class="muted small">Checking what is installed…</p></fieldset>
+        <div class="ai-local" id="ai-local" hidden>
+          <label class="field compact grow"><span>Server</span><input id="ai-local-url" type="text" spellcheck="false" autocomplete="off" placeholder="http://127.0.0.1:8080" /></label>
+          <label class="field compact"><span>Model</span><select id="ai-local-model"><option value="">Server default</option></select></label>
+          <button type="button" class="ghost compact" id="ai-local-check">Check</button>
+        </div>
+        <div id="ai-thread" class="ai-thread" hidden></div>
+        <label class="field" id="ai-reply-wrap" hidden><span>Your reply</span><textarea id="ai-reply" rows="3" maxlength="20000"></textarea></label>
+        <div class="form-actions">
+          <button type="button" class="primary" id="ai-send" disabled>Send prompt</button>
+          <button type="button" class="ghost" id="ai-stop" hidden>Stop</button>
+          <button type="button" class="ghost" id="ai-copy-chat" hidden>Copy conversation</button>
+          <button type="button" class="ghost" id="ai-reset" hidden>Start over</button>
+          <span id="ai-chat-status" class="status-line" aria-live="polite"></span>
         </div>
       </section>`;
     openModal(`Analyze with AI · scan of ${fmtTime(latest.finishedAt)}`, "", html);
@@ -1585,13 +1624,20 @@
     const status = $("ai-status");
     let counts = null;
     let seq = 0;
+    // chat.prompt is fixed at the first send; history alternates assistant
+    // replies and the owner's answers.
+    const chat = { backends: [], backend: "", prompt: "", history: [], ctrl: null, started: 0, timer: null };
     const sync = () => {
       // The prompt stays locked (no selecting, editing or copying by hand)
       // until the risk is acknowledged.
       const ok = !!counts && $("ai-ack").checked;
-      area.disabled = !ok;
+      const talking = chat.history.length > 0 || !!chat.ctrl;
+      area.disabled = !ok || talking;
+      $("ai-mask-macs").disabled = talking;
+      $("ai-mask-names").disabled = talking;
       $("ai-copy").disabled = !ok;
       $("ai-download").disabled = !ok;
+      syncChat(ok);
       $("ai-stats").textContent = counts
         ? `About ${fmtNumber(Math.ceil(area.value.length / 4))} tokens · ${plural(counts.devices, "device")} · ${plural(counts.findings, "finding")}`
         : "";
@@ -1615,6 +1661,170 @@
       }
       sync();
     };
+    const backendLabel = (id) => chat.backends.find((b) => b.id === id)?.label || "AI";
+
+    function syncChat(ok) {
+      const busy = !!chat.ctrl;
+      const talking = chat.history.length > 0 || busy;
+      const b = chat.backends.find((x) => x.id === chat.backend);
+      document.querySelectorAll('input[name="ai-backend"]').forEach((r) => {
+        const info = chat.backends.find((x) => x.id === r.value);
+        r.disabled = !ok || talking || !(info?.available || info?.id === "local");
+      });
+      $("ai-local").hidden = chat.backend !== "local";
+      ["ai-local-url", "ai-local-model", "ai-local-check"].forEach((id) => ($(id).disabled = !ok || talking));
+      const replying = chat.history.length > 0;
+      $("ai-reply-wrap").hidden = !replying;
+      $("ai-reply").disabled = !ok || busy;
+      $("ai-send").textContent = replying ? "Send reply" : "Send prompt";
+      $("ai-send").disabled = !ok || busy || !b?.available || (replying && !$("ai-reply").value.trim());
+      $("ai-stop").hidden = !busy;
+      $("ai-copy-chat").hidden = !chat.history.length;
+      $("ai-reset").hidden = !chat.history.length || busy;
+    }
+
+    function renderBackends() {
+      const box = $("ai-backends");
+      box.innerHTML =
+        `<legend class="sr-only">AI to ask</legend>` +
+        chat.backends
+          .map(
+            (b) => `<label class="check ai-backend">
+              <input type="radio" name="ai-backend" value="${escapeHtml(b.id)}" ${b.id === chat.backend ? "checked" : ""} />
+              <span><strong>${escapeHtml(b.label)}</strong>${b.version ? ` <span class="muted small mono">${escapeHtml(b.version)}</span>` : ""}
+                <small class="${b.available ? "muted" : "ai-unavailable"}">${escapeHtml(b.available ? b.note : b.reason || "Not available.")}</small></span>
+            </label>`
+          )
+          .join("");
+      box.querySelectorAll('input[name="ai-backend"]').forEach((r) =>
+        r.addEventListener("change", () => {
+          chat.backend = r.value;
+          remember(AI_BACKEND_KEY, r.value);
+          sync();
+        })
+      );
+      const local = chat.backends.find((b) => b.id === "local");
+      const sel = $("ai-local-model");
+      const keep = sel.value;
+      sel.innerHTML =
+        `<option value="">Server default</option>` + (local?.models || []).map((m) => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
+      // Pick a listed model unless one was chosen: Ollama needs a model name.
+      if (keep && [...sel.options].some((o) => o.value === keep)) sel.value = keep;
+      else if (local?.models?.length) sel.value = local.models[0];
+      sync();
+    }
+
+    async function loadBackends() {
+      try {
+        const res = await api("/api/assistant?localUrl=" + encodeURIComponent($("ai-local-url").value.trim()));
+        if (!document.contains(area)) return;
+        chat.backends = res.backends || [];
+      } catch (e) {
+        if (!document.contains(area)) return;
+        $("ai-backends").innerHTML = `<p class="muted small">${escapeHtml("Could not check for AI tools: " + e.message)}</p>`;
+        return;
+      }
+      if (!chat.backends.some((b) => b.id === chat.backend)) {
+        chat.backend = (chat.backends.find((b) => b.available) || chat.backends[0] || {}).id || "";
+      }
+      renderBackends();
+    }
+
+    function renderThread() {
+      const thread = $("ai-thread");
+      thread.hidden = !chat.history.length && !chat.ctrl;
+      const who = backendLabel(chat.backend);
+      const items = [`<div class="ai-msg ai-msg-user"><p class="context-label">You</p><p class="muted small">Sent the prompt above (about ${fmtNumber(Math.ceil(chat.prompt.length / 4))} tokens).</p></div>`];
+      for (const m of chat.history) {
+        items.push(
+          `<div class="ai-msg ai-msg-${m.role === "assistant" ? "ai" : "user"}"><p class="context-label">${escapeHtml(m.role === "assistant" ? who : "You")}</p><div class="ai-text">${escapeHtml(m.text)}</div></div>`
+        );
+      }
+      if (chat.ctrl) items.push(`<div class="ai-msg ai-msg-ai"><p class="context-label">${escapeHtml(who)}</p><p class="muted small" id="ai-wait">Thinking…</p></div>`);
+      thread.innerHTML = items.join("");
+      thread.scrollTop = thread.scrollHeight;
+    }
+
+    async function send() {
+      const cs = $("ai-chat-status");
+      if (!chat.history.length) chat.prompt = area.value;
+      else chat.history.push({ role: "user", text: $("ai-reply").value.trim() });
+      const history = chat.history.slice();
+      chat.ctrl = new AbortController();
+      chat.started = Date.now();
+      cs.textContent = "";
+      renderThread();
+      sync();
+      chat.timer = setInterval(() => {
+        const w = $("ai-wait");
+        if (w) w.textContent = `Thinking… ${Math.round((Date.now() - chat.started) / 1000)} s (a first answer can take a minute or two)`;
+      }, 1000);
+      try {
+        const res = await api("/api/assistant/ask", {
+          method: "POST",
+          signal: chat.ctrl.signal,
+          body: JSON.stringify({
+            backend: chat.backend,
+            prompt: chat.prompt,
+            history,
+            localUrl: $("ai-local-url").value.trim(),
+            localModel: $("ai-local-model").value,
+          }),
+        });
+        chat.history.push({ role: "assistant", text: res.reply });
+        $("ai-reply").value = "";
+      } catch (e) {
+        // Keep the owner's unanswered reply in the box to send again.
+        if (history.length) $("ai-reply").value = chat.history.pop().text;
+        cs.textContent = e.name === "AbortError" ? "Stopped." : e.message;
+      } finally {
+        clearInterval(chat.timer);
+        chat.ctrl = null;
+      }
+      if (!document.contains(area)) return;
+      renderThread();
+      sync();
+      if (chat.history.length) $("ai-reply").focus();
+    }
+
+    $("ai-local-url").value = remembered(AI_LOCAL_KEY, "http://127.0.0.1:8080");
+    chat.backend = remembered(AI_BACKEND_KEY);
+    $("ai-local-check").addEventListener("click", () => {
+      remember(AI_LOCAL_KEY, $("ai-local-url").value.trim());
+      loadBackends();
+    });
+    $("ai-reply").addEventListener("input", sync);
+    $("ai-reply").addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !$("ai-send").disabled) send();
+    });
+    $("ai-send").addEventListener("click", send);
+    $("ai-stop").addEventListener("click", () => chat.ctrl?.abort());
+    $("ai-reset").addEventListener("click", () => {
+      if (!confirm("Start over? This conversation will be lost.")) return;
+      chat.history = [];
+      chat.prompt = "";
+      $("ai-chat-status").textContent = "";
+      renderThread();
+      sync();
+    });
+    $("ai-copy-chat").addEventListener("click", async () => {
+      const who = backendLabel(chat.backend);
+      const text = [chat.prompt, ...chat.history.map((m) => `## ${m.role === "assistant" ? who : "You"}\n\n${m.text}`)].join("\n\n");
+      try {
+        await navigator.clipboard.writeText(text);
+        $("ai-chat-status").textContent = "Conversation copied.";
+      } catch {
+        $("ai-chat-status").textContent = "Could not copy the conversation.";
+      }
+    });
+    modalGuard = () => {
+      if (!chat.history.length && !chat.ctrl) return true;
+      if (!confirm("Close and lose this conversation?")) return false;
+      chat.ctrl?.abort();
+      return true;
+    };
+    loadBackends();
+
     $("ai-mask-macs").addEventListener("change", load);
     $("ai-mask-names").addEventListener("change", load);
     $("ai-ack").addEventListener("change", sync);
@@ -1666,6 +1876,8 @@
   // ---------- modal ----------
 
   let modalReturnFocus = null;
+  // modalGuard, when set, can keep the modal open (returns false) or tidy up.
+  let modalGuard = null;
 
   function openModal(title, sub, html, focus = true) {
     const modal = $("modal");
@@ -1684,6 +1896,8 @@
   function closeModal() {
     const modal = $("modal");
     if (modal.hidden) return;
+    if (modalGuard && !modalGuard()) return;
+    modalGuard = null;
     modal.hidden = true;
     document.body.classList.remove("modal-open");
     $("modal-body").innerHTML = "";

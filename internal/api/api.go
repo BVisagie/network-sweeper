@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/BVisagie/network-sweeper/internal/assistant"
 	"github.com/BVisagie/network-sweeper/internal/discover"
 	"github.com/BVisagie/network-sweeper/internal/enrich"
 	"github.com/BVisagie/network-sweeper/internal/inventory"
@@ -35,6 +36,8 @@ type Server struct {
 	Elevated   bool
 	// Store keeps history and annotations; New starts with a memory-only one.
 	Store *inventory.Store
+	// Assistant runs the user's own AI CLIs or local model server.
+	Assistant *assistant.Service
 
 	mu           sync.Mutex
 	customOptIn  bool
@@ -51,10 +54,11 @@ type ScanSnapshot = inventory.Snapshot
 // New creates a server with a fresh session token.
 func New(webFS fs.FS, elevated bool) *Server {
 	return &Server{
-		Token:    newToken(),
-		WebFS:    webFS,
-		Elevated: elevated,
-		Store:    inventory.Memory(inventory.ModeEphemeral, "Running without saved history."),
+		Token:     newToken(),
+		WebFS:     webFS,
+		Elevated:  elevated,
+		Store:     inventory.Memory(inventory.ModeEphemeral, "Running without saved history."),
+		Assistant: assistant.New(assistant.Options{}),
 	}
 }
 
@@ -87,6 +91,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/changes", s.withSecurity(s.handleChanges))
 	mux.HandleFunc("POST /api/profiles/{id}", s.withSecurity(s.handleProfile))
 	mux.HandleFunc("GET /api/analysis-prompt", s.withSecurity(s.handleAnalysisPrompt))
+	mux.HandleFunc("GET /api/assistant", s.withSecurity(s.handleAssistant))
+	mux.HandleFunc("POST /api/assistant/ask", s.withSecurity(s.handleAssistantAsk))
 	mux.Handle("/", s.uiHandler())
 	return mux
 }

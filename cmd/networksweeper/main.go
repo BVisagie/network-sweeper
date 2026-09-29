@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/BVisagie/network-sweeper/internal/api"
+	"github.com/BVisagie/network-sweeper/internal/assistant"
 	"github.com/BVisagie/network-sweeper/internal/inventory"
 	"github.com/BVisagie/network-sweeper/internal/platform"
 	"github.com/BVisagie/network-sweeper/internal/version"
@@ -30,6 +31,8 @@ func main() {
 	showVersion := flag.Bool("version", false, "print version and exit")
 	dataDir := flag.String("data-dir", "", "keep scan history and device notes in this directory")
 	ephemeral := flag.Bool("ephemeral", false, "keep nothing after exit: history lives in memory for this session")
+	claudePath := flag.String("claude-path", "", "path to the Claude CLI, when it is not on PATH")
+	codexPath := flag.String("codex-path", "", "path to the Codex CLI, when it is not on PATH")
 	flag.Parse()
 
 	if *showVersion {
@@ -46,6 +49,7 @@ func main() {
 	defer store.Close()
 	srv := api.New(web.FS, elevated)
 	srv.Store = store
+	srv.Assistant = assistant.New(assistant.Options{ClaudePath: *claudePath, CodexPath: *codexPath})
 	hs, ln, err := srv.ListenAndServe()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listen failed: %v\n", err)

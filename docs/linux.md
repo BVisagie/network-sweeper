@@ -96,6 +96,8 @@ sudo network-sweeper
 
 TCP discovery and findings scans work without elevation. Full matrix: [PLATFORM.md](PLATFORM.md).
 
+With `sudo`, **Analyze with AI** still works: the Claude or Codex CLI runs as the user who started sudo, never as root, so it finds your own login. The CLIs are looked up on `PATH`, then in `~/.local/bin`, mise shims, npm, bun, volta and cargo folders. Pass `-claude-path` or `-codex-path` if yours lives elsewhere.
+
 ## Saved history
 
 Scan history, device names, notes, tags, and finding reviews are saved in `~/.local/share/network-sweeper` (or `$XDG_DATA_HOME/network-sweeper`. Pass `--data-dir DIR` to use another folder, or `--ephemeral` to keep nothing after exit. Elevated runs (`sudo`) keep history in memory only, so root never writes into your inventory; add `--data-dir` if you want an elevated run to save. The one-liner's default run-once mode passes `--ephemeral`; an installed copy saves. Settings → **History and saved data** shows where data lives, sets how many scans to keep (100 by default), and deletes history.
